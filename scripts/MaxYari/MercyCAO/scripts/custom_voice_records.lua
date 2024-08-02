@@ -3,12 +3,30 @@
 
 local types = require("openmw.types")
 
-local vf = "scripts\\MaxYari\\experiments\\voices\\"
+local vf = "scripts\\MaxYari\\MercyCAO\\voices\\"
 local vvf = "Sound\\Vo\\"
 
 -- Note that the format of this records is slightly different from vanilla to keep it shorter.
 local records = {
    StandGround = {
+      {
+         race = "imperial",
+         gender = "male",
+         infos = {
+            {
+               text = "",
+               sound = vf .. "ImpMStandGround1.mp3"
+            },
+            {
+               text = "",
+               sound = vf .. "ImpMStandGround2.mp3"
+            },
+            {
+               text = "",
+               sound = vf .. "ImpMStandGround3.mp3"
+            }
+         }
+      },
       {
          race = "orc",
          gender = "male",
@@ -24,6 +42,24 @@ local records = {
             {
                text = "",
                sound = vf .. "OrcMStandGround3.mp3"
+            }
+         }
+      },
+      {
+         race = "orc",
+         gender = "female",
+         infos = {
+            {
+               text = "",
+               sound = vf .. "OrcFStandGround1.mp3"
+            },
+            {
+               text = "",
+               sound = vf .. "OrcFStandGround2.mp3"
+            },
+            {
+               text = "",
+               sound = vf .. "OrcFStandGround3.mp3"
             }
          }
       },
@@ -98,6 +134,24 @@ local records = {
    },
    CombatDowntime = {
       {
+         race = "imperial",
+         gender = "male",
+         infos = {
+            {
+               text = "",
+               sound = vf .. "ImpMCombatDowntime1.mp3"
+            },
+            {
+               text = "",
+               sound = vf .. "ImpMCombatDowntime2.mp3"
+            },
+            {
+               text = "",
+               sound = vf .. "ImpMCombatDowntime3.mp3"
+            }
+         }
+      },
+      {
          race = "orc",
          gender = "male",
          infos = {
@@ -112,6 +166,24 @@ local records = {
             {
                text = "",
                sound = vf .. "OrcMCombatDowntime3.mp3"
+            }
+         }
+      },
+      {
+         race = "orc",
+         gender = "female",
+         infos = {
+            {
+               text = "",
+               sound = vf .. "OrcFCombatDowntime1.mp3"
+            },
+            {
+               text = "",
+               sound = vf .. "OrcFCombatDowntime2.mp3"
+            },
+            {
+               text = "",
+               sound = vf .. "OrcFCombatDowntime3.mp3"
             }
          }
       },
@@ -198,6 +270,24 @@ local records = {
    },
    Retreat = {
       {
+         race = "imperial",
+         gender = "male",
+         infos = {
+            {
+               text = "",
+               sound = vf .. "ImpMRetreat1.mp3"
+            },
+            {
+               text = "",
+               sound = vf .. "ImpMRetreat2.mp3"
+            },
+            {
+               text = "",
+               sound = vf .. "ImpMRetreat3.mp3"
+            }
+         }
+      },
+      {
          race = "orc",
          gender = "male",
          infos = {
@@ -212,6 +302,24 @@ local records = {
             {
                text = "",
                sound = vf .. "OrcMRetreat3.mp3"
+            }
+         }
+      },
+      {
+         race = "orc",
+         gender = "female",
+         infos = {
+            {
+               text = "",
+               sound = vf .. "OrcFRetreat1.mp3"
+            },
+            {
+               text = "",
+               sound = vf .. "OrcFRetreat2.mp3"
+            },
+            {
+               text = "",
+               sound = vf .. "OrcFRetreat3.mp3"
             }
          }
       },
@@ -289,6 +397,52 @@ local records = {
       },
    },
    GetEm = {
+      {
+         race = "imperial",
+         gender = "male",
+         infos = {
+            {
+               text = "Grab her!",
+               sound = vvf .. "i\\m\\OP_IM001.mp3",
+               targetGender = "female"
+            },
+            {
+               text = "Grab him!",
+               sound = vvf .. "i\\m\\OP_IM002.mp3",
+               targetGender = "male"
+            },
+            {
+               text = "She's over here!",
+               sound = vvf .. "i\\m\\OP_IM003.mp3",
+               targetGender = "female"
+            },
+            {
+               text = "He's over here!",
+               sound = vvf .. "i\\m\\OP_IM004.mp3",
+               targetGender = "male"
+            },
+            {
+               text = "There he is!",
+               sound = vvf .. "i\\m\\OP_IM005.mp3",
+               targetGender = "male"
+            },
+            {
+               text = "There she is!",
+               sound = vvf .. "i\\m\\OP_IM006.mp3",
+               targetGender = "female"
+            },
+            {
+               text = "Seize her!",
+               sound = vvf .. "i\\m\\OP_IM007.mp3",
+               targetGender = "female"
+            },
+            {
+               text = "Seize him!",
+               sound = vvf .. "i\\m\\OP_IM008.mp3",
+               targetGender = "male"
+            }
+         }
+      },
       {
          race = "orc",
          gender = "female",
@@ -568,6 +722,24 @@ local records = {
    },
    Mercy = {
       {
+         race = "imperial",
+         gender = "male",
+         infos = {
+            {
+               text = "",
+               sound = vf .. "ImpMMercy1.mp3"
+            },
+            {
+               text = "",
+               sound = vf .. "ImpMMercy2.mp3"
+            },
+            {
+               text = "",
+               sound = vf .. "ImpMMercy3.mp3"
+            }
+         }
+      },
+      {
          race = "orc",
          gender = "male",
          infos = {
@@ -582,6 +754,24 @@ local records = {
             {
                text = "",
                sound = vf .. "OrcMMercy3.mp3"
+            }
+         }
+      },
+      {
+         race = "orc",
+         gender = "female",
+         infos = {
+            {
+               text = "",
+               sound = vf .. "OrcFMercy1.mp3"
+            },
+            {
+               text = "",
+               sound = vf .. "OrcFMercy2.mp3"
+            },
+            {
+               text = "",
+               sound = vf .. "OrcFMercy3.mp3"
             }
          }
       },
@@ -660,6 +850,24 @@ local records = {
    },
    MercyDisarm = {
       {
+         race = "imperial",
+         gender = "male",
+         infos = {
+            {
+               text = "",
+               sound = vf .. "ImpMMercyDisarm1.mp3"
+            },
+            {
+               text = "",
+               sound = vf .. "ImpMMercyDisarm2.mp3"
+            },
+            {
+               text = "",
+               sound = vf .. "ImpMMercyDisarm3.mp3"
+            }
+         }
+      },
+      {
          race = "orc",
          gender = "male",
          infos = {
@@ -674,6 +882,24 @@ local records = {
             {
                text = "",
                sound = vf .. "OrcMMercyDisarm3.mp3"
+            }
+         }
+      },
+      {
+         race = "orc",
+         gender = "female",
+         infos = {
+            {
+               text = "",
+               sound = vf .. "OrcFMercyDisarm1.mp3"
+            },
+            {
+               text = "",
+               sound = vf .. "OrcFMercyDisarm2.mp3"
+            },
+            {
+               text = "",
+               sound = vf .. "OrcFMercyDisarm3.mp3"
             }
          }
       },
@@ -764,6 +990,24 @@ local records = {
    },
    MercyDisengage = {
       {
+         race = "imperial",
+         gender = "male",
+         infos = {
+            {
+               text = "",
+               sound = vf .. "ImpMMercyDisengage1.mp3"
+            },
+            {
+               text = "",
+               sound = vf .. "ImpMMercyDisengage2.mp3"
+            },
+            {
+               text = "",
+               sound = vf .. "ImpMMercyDisengage3.mp3"
+            }
+         }
+      },
+      {
          race = "orc",
          gender = "male",
          infos = {
@@ -778,6 +1022,24 @@ local records = {
             {
                text = "",
                sound = vf .. "OrcMMercyDisengage3.mp3"
+            }
+         }
+      },
+      {
+         race = "orc",
+         gender = "female",
+         infos = {
+            {
+               text = "",
+               sound = vf .. "OrcFMercyDisengage1.mp3"
+            },
+            {
+               text = "",
+               sound = vf .. "OrcFMercyDisengage2.mp3"
+            },
+            {
+               text = "",
+               sound = vf .. "OrcFMercyDisengage3.mp3"
             }
          }
       },
@@ -860,6 +1122,24 @@ local records = {
    },
    FriendDead = {
       {
+         race = "imperial",
+         gender = "male",
+         infos = {
+            {
+               text = "",
+               sound = vf .. "ImpMFriendDead1.mp3"
+            },
+            {
+               text = "",
+               sound = vf .. "ImpMFriendDead2.mp3"
+            },
+            {
+               text = "",
+               sound = vf .. "ImpMFriendDead3.mp3"
+            }
+         }
+      },
+      {
          race = "orc",
          gender = "male",
          infos = {
@@ -874,6 +1154,24 @@ local records = {
             {
                text = "",
                sound = vf .. "OrcMFriendDead3.mp3"
+            }
+         }
+      },
+      {
+         race = "orc",
+         gender = "female",
+         infos = {
+            {
+               text = "",
+               sound = vf .. "OrcFFriendDead1.mp3"
+            },
+            {
+               text = "",
+               sound = vf .. "OrcFFriendDead2.mp3"
+            },
+            {
+               text = "",
+               sound = vf .. "OrcFFriendDead3.mp3"
             }
          }
       },
@@ -952,6 +1250,24 @@ local records = {
    },
    Warcry = {
       {
+         race = "imperial",
+         gender = "male",
+         infos = {
+            {
+               text = "",
+               sound = vf .. "ImpMWarcry1.mp3"
+            },
+            {
+               text = "",
+               sound = vf .. "ImpMWarcry2.mp3"
+            },
+            {
+               text = "",
+               sound = vf .. "ImpMWarcry3.mp3"
+            }
+         }
+      },
+      {
          race = "orc",
          gender = "male",
          infos = {
@@ -966,6 +1282,24 @@ local records = {
             {
                text = "",
                sound = vf .. "OrcMWarcry3.mp3"
+            }
+         }
+      },
+      {
+         race = "orc",
+         gender = "female",
+         infos = {
+            {
+               text = "",
+               sound = vf .. "OrcFWarcry1.mp3"
+            },
+            {
+               text = "",
+               sound = vf .. "OrcFWarcry2.mp3"
+            },
+            {
+               text = "",
+               sound = vf .. "OrcFWarcry3.mp3"
             }
          }
       },

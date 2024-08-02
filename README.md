@@ -1,6 +1,3 @@
-<img width="385" alt="image" src="https://github.com/MaxYari/OpenMWExperimentalMods/assets/12214398/ffc47f1e-c09c-4aae-9f52-a322c07f3e00">
-<img width="385" alt="image" src="https://github.com/MaxYari/OpenMWExperimentalMods/assets/12214398/d3296b67-aea1-47d8-a75c-475fb761156d">
-
 # Mercy: Combat AI Overhaul
 
 A significant overhaul of in-combat NPC behavior for OpenMW. Using custom lua behavior trees library, with new voice lines and animations. Melee NPCs are fully affected. Ranged and spellcasters affected only partially.
