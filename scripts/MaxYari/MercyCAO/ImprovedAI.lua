@@ -334,7 +334,7 @@ local function STARTEVERYTHING()
 
    bTrees.Combat:setDebugLevel(0)
    bTrees.CombatAux:setDebugLevel(0)
-   bTrees.Locomotion:setDebugLevel(1)
+   bTrees.Locomotion:setDebugLevel(0)
    -- Ready to use! -----------------------------------------------------------
 
    -- Rndomising key npc factors
@@ -358,11 +358,11 @@ CanGoHamProb = 0.5
 BaseFriendFightVal = 80
 AvengeShoutProb = 0.5
 -- TO DO: Comment this out for production
-StandGroundProbModifier = 1e42
-ScaredProbModifier = 1e42
-CanGoHamProb = 1
-BaseFriendFightVal = 30
-AvengeShoutProb = 1
+-- StandGroundProbModifier = 1e42
+-- ScaredProbModifier = 1e42
+-- CanGoHamProb = 1
+-- BaseFriendFightVal = 30
+-- AvengeShoutProb = 1
 local lastWeaponRecord = { id = "_" }
 local lastAiPackage = { type = nil }
 local lastHealth = selfActor.stats.dynamic:health().current
