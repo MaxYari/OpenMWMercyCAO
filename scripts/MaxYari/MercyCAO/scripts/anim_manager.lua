@@ -35,6 +35,13 @@ local animationConfigs = {
     }
 }
 
+-- Patching for animation API update:
+for anim, opts in pairs(animationConfigs) do
+    opts.startKey = opts.startkey
+    opts.stopKey = opts.stopkey
+    opts.blendMask = opts.blendmask
+end
+
 
 
 local function addOnKeyHandler(cb)

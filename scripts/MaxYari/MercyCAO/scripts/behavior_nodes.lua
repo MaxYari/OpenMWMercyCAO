@@ -33,7 +33,7 @@ local navService = NavigationService({
 -- Custom behaviours ------------------
 ---------------------------------------
 
-function VanillaBehavior(config)
+local function VanillaBehavior(config)
     config.start = function(task, state)
         state.vanillaBehavior = true
     end
@@ -48,38 +48,60 @@ end
 BT.register("VanillaBehavior", VanillaBehavior)
 
 
-function InMarksmanStance(config)
+local function ContinuousCondition(config)
     config.shouldRun = function(task, state)
-        return state.detStance == gutils.Actor.DET_STANCE.Marksman
+        if not task.started then return false end
+        -- Only interrupt itself, and only when condition is false
+        return config.condition(task, state)
+    end
+
+    config.start = function(task, state)
+        if not config.condition(task, state) then
+            task:fail()
+        else
+            task.started = true
+        end
+    end
+
+    config.finish = function(task, state)
+        task.started = false
     end
 
     return BT.InterruptDecorator:new(config)
+end
+
+local function InMarksmanStance(config)
+    config.condition = function(task, state)
+        return state.detStance == gutils.Actor.DET_STANCE.Marksman
+    end
+
+    return ContinuousCondition(config)
 end
 
 BT.register("InMarksmanStance", InMarksmanStance)
 
-function InMeleeStance(config)
-    config.shouldRun = function(task, state)
+local function InMeleeStance(config)
+    config.condition = function(task, state)
         return state.detStance == gutils.Actor.DET_STANCE.Melee
     end
 
-    return BT.InterruptDecorator:new(config)
+    return ContinuousCondition(config)
 end
 
 BT.register("InMeleeStance", InMeleeStance)
 
-function InSpellStance(config)
-    config.shouldRun = function(task, state)
+local function InSpellStance(config)
+    config.condition = function(task, state)        
         return state.detStance == gutils.Actor.DET_STANCE.Spell
     end
 
-    return BT.InterruptDecorator:new(config)
+    return ContinuousCondition(config)
 end
 
 BT.register("InSpellStance", InSpellStance)
 
 
-function ChaseTarget(config)
+local function ChaseTarget(config)
     local props = config.properties
 
     config.start = function(task, state)

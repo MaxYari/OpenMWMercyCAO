@@ -334,7 +334,7 @@ local function STARTEVERYTHING()
 
    bTrees.Combat:setDebugLevel(0)
    bTrees.CombatAux:setDebugLevel(0)
-   bTrees.Locomotion:setDebugLevel(0)
+   bTrees.Locomotion:setDebugLevel(1)
    -- Ready to use! -----------------------------------------------------------
 
    -- Rndomising key npc factors
