@@ -291,12 +291,23 @@ local function maybeInjectExtensions(node, treeName)
             "Non-composite node is marked as an extension (extensionPoint property). This should never happen. If you are using an 'extensionPoint' property on your node - don't, it's reserved.")
       end
       local extensionPoint = node.properties.extensionPoint()
+      local extensionUsed = false
       if extensions[treeName] and extensions[treeName][extensionPoint] then
          local extensionObjs = extensions[treeName][extensionPoint]
          for _, extensionObj in ipairs(extensionObjs) do
             extensionObj.isUsed = true
             gutils.print("Found an extension", extensionObj.name, "for an extension point", treeName, extensionPoint, 1)
+            extensionUsed = true
             table.insert(node.childNodes, 1, extensionWrapperNode(extensionObj))
+         end
+      end
+      -- Removing all the nodes that need to be removed upon extension
+      if extensionUsed then
+         for i = #node.childNodes, 1, -1 do
+            local child = node.childNodes[i]
+            if child.properties.delOnExtension and child.properties.delOnExtension() then
+               table.remove(node.childNodes, i)
+            end
          end
       end
    end

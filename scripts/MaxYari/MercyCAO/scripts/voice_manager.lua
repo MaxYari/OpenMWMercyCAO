@@ -47,7 +47,11 @@ local function beastCheck(info, isBeast)
     return isBeast or not fileName:match("^b")
 end
 
-local function findRelevantInfos(recordType, race, gender, isBeast)
+local function vampireCheck(info, isVampire)
+    return isVampire or not string.find(info.sound,"/vo/v/")
+end
+
+local function findRelevantInfos(recordType, race, gender, isBeast, isVampire)
     local fittingInfos = {}
     local records = core.dialogue.voice.records[recordType]
     if not records then return fittingInfos end
@@ -56,7 +60,8 @@ local function findRelevantInfos(recordType, race, gender, isBeast)
 
     for _, voiceInfo in pairs(records.infos) do
         -- Need to also filter by enemy race and also accept those that are nil?
-        if voiceInfo.sound and voiceInfo.filterActorRace == race and voiceInfo.filterActorGender == gender and (not voiceInfo.filterActorId or voiceInfo.filterActorId == omwself.recordId) and noSpecificFilters(voiceInfo) and beastCheck(voiceInfo, isBeast) then
+        -- TO DO: Probably should not check for omwself here in the future. This function kind of suppose to work on any actor, not only on self. For now it works only on self anyway though.
+        if voiceInfo.sound and voiceInfo.filterActorRace == race and voiceInfo.filterActorGender == gender and (not voiceInfo.filterActorId or voiceInfo.filterActorId == omwself.recordId) and noSpecificFilters(voiceInfo) and beastCheck(voiceInfo, isBeast) and vampireCheck(voiceInfo, isVampire) then
             --print(gutils.dialogRecordInfoToString(voiceInfo))
             table.insert(fittingInfos, voiceInfo)
         end
@@ -74,9 +79,12 @@ local function say(actor, targetActor, recordType, force)
         error("Say was called without an actor")
     end
 
+    local wActor = gutils.Actor:new(actor)
+
     local race = nil
     local gender = nil
     local isBeast = false
+    local isVampire = false
     local targetGender = nil
 
     if types.NPC.objectIsInstance(actor) then
@@ -88,6 +96,7 @@ local function say(actor, targetActor, recordType, force)
         end
         race = npc.race
         isBeast = types.NPC.isWerewolf(actor)
+        isVampire = wActor:isVampire()
     end
 
     if targetActor and types.NPC.objectIsInstance(targetActor) then
@@ -103,8 +112,8 @@ local function say(actor, targetActor, recordType, force)
 
 
     local fittingInfos = {}
-    fittingInfos = customVoiceRecords.findRelevantInfos(recordType, race, gender, isBeast)
-    if #fittingInfos == 0 then fittingInfos = findRelevantInfos(recordType, race, gender, isBeast) end
+    fittingInfos = customVoiceRecords.findRelevantInfos(recordType, race, gender, isBeast, isVampire)
+    if #fittingInfos == 0 then fittingInfos = findRelevantInfos(recordType, race, gender, isBeast, isVampire) end
 
     -- Pick random voice file ensuring that same line doesnt repeat twice
     -- print("Fitting amount of voicelines: ", #fittingInfos)
