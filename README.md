@@ -1,6 +1,10 @@
 # Mercy: Combat AI Overhaul
 
-A significant overhaul of in-combat NPC behavior for OpenMW. Using custom lua behavior trees library, with new voice lines and animations. Melee NPCs are fully affected. Ranged and spellcasters affected only partially.
+A significant overhaul of in-combat NPC behavior for OpenMW. Using custom lua behavior trees library, with new voice lines and animations. Overhauls Melee NPCs, partially affects ranged and spellcasters. 
+
+![Demo 1](/imgs/demo1.gif)
+![Demo 2](/imgs/demo2.gif)
+![Demo 3](/imgs/demo3.gif)
 
 ## How to install
 
@@ -51,9 +55,10 @@ interfaces.MercyCAO.addExtension("Locomotion", "STAND_GROUND", "Melee", {
    end,
    run = function(task, state)
       print("My custom extension running!")
-      -- task:success() -- Ends this task (extension) with a success state. This will continue execution through the rest of MercyCAO behaviours in this part of the tree.
-      task:fail() -- End with a failure state. This will prevent the rest of behaviors in this part of the tree from running.
-      -- task:running() -- Return this to signify that your task is still running. run function will start again next frame.
+      -- From within this function you should report one of the following statuses:
+      task:success() -- Ends this task (extension) with a success state. The execution will continue through the rest of MercyCAO behaviours.
+      -- task:fail() -- Same as success, in extensions fail and result in the same outcome, yet it's still a good idea to report an appropriate status.
+      -- task:running() -- Report this to signify that your task is still running. run method will start again next frame.
    end,
    finish = function(task, state)
       print("My custom extension is done!")

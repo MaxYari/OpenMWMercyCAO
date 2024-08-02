@@ -129,7 +129,7 @@ local state = {
    end,
    CSIs = function(self, stateString)
       return self.combatState == self.COMBAT_STATE[stateString]
-   end   
+   end
 }
 
 
@@ -265,7 +265,7 @@ end
 -----------------------------------------------------------------------------------------------------------------
 
 -- Parsing JSON behaviourtree -----
-gutils.print("Reading Behavior3 project",2)
+gutils.print("Reading Behavior3 project", 2)
 -- Read the behaviour tree JSON file exported from the editor---------------
 local file = vfs.open("scripts/MaxYari/MercyCAO/OpenMW AI.b3")
 if not file then error("Failed opening behaviour tree file.") end
@@ -296,7 +296,7 @@ local function maybeInjectExtensions(node, treeName)
          for _, extensionObj in ipairs(extensionObjs) do
             extensionObj.isUsed = true
             gutils.print("Found an extension", extensionObj.name, "for an extension point", treeName, extensionPoint, 1)
-            table.insert(node.childNodes, 1, extensionWrapperNode(extensionObj))            
+            table.insert(node.childNodes, 1, extensionWrapperNode(extensionObj))
          end
       end
    end
@@ -471,7 +471,6 @@ local function onUpdate(dt)
    if activeAiPackage.type ~= "Combat" or types.Actor.isDead(activeAiPackage.target) or selfActor:isDead() then
       state.combatState = enums.COMBAT_STATE.NO_STATE
       shouldOverrideAI = false
-      return
    end
    -- Short circuit for mages in combat - temporary. TO DO: will also be nice to make this toggleable for expansion mods
    if state.combatState == enums.COMBAT_STATE.FIGHT and selfActor:isSpellCaster() and spellCastersAreVanilla then

@@ -9,7 +9,7 @@ if omwself.recordId == "ab01alsonar" then return end
 
 DebugLevel = 0
 
---if not I.MercyCAO then error("MercyCAO compatibility patches script can not detect main MercyCAO. Ensure that compatiblity patches script is in a load order BELOW MercyCAO and BELOW the mods compatibility for which is being patched.") end
+if not I.MercyCAO then error("MercyCAO compatibility patches script can not detect main MercyCAO. Ensure that compatiblity patches script is in a load order BELOW MercyCAO and BELOW the mods compatibility for which is being patched.") end
 
 if I.TakeCover then
     gutils.print("Take Cover by Mym detected - applying compatibility patch.", 1)
@@ -21,8 +21,7 @@ if I.TakeCover then
                 state.vanillaBehavior = true
                 task:running()
             else
-                --If we are not fleeing - we want to continue to the rest of behavior, so we end with success
-                task:success()
+                task:fail()
             end
         end
     }

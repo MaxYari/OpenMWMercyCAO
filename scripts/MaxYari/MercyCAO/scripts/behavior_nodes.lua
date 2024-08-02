@@ -49,6 +49,8 @@ BT.register("VanillaBehavior", VanillaBehavior)
 
 
 local function ContinuousCondition(config)
+    config.isStealthy = false
+
     config.shouldRun = function(task, state)
         if not task.started then return false end
         -- Only interrupt itself, and only when condition is false
@@ -56,6 +58,7 @@ local function ContinuousCondition(config)
     end
 
     config.start = function(task, state)
+        print("CONT COND STARTED")
         if not config.condition(task, state) then
             task:fail()
         else
@@ -81,7 +84,7 @@ end
 BT.register("InMarksmanStance", InMarksmanStance)
 
 local function InMeleeStance(config)
-    config.condition = function(task, state)
+    config.condition = function(task, state)        
         return state.detStance == gutils.Actor.DET_STANCE.Melee
     end
 

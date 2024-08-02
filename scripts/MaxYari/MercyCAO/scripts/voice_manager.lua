@@ -131,9 +131,10 @@ local function say(actor, targetActor, recordType, force)
     lastPickedIndices[recordType] = pickedIndex
 
     local voiceInfo = fittingInfos[pickedIndex]
-    -- print("Voiceline to use: ", voiceInfo.sound, voiceInfo.text)
+    
 
     -- Finally say it!
+    print("Voiceline to use: ", voiceInfo.sound, voiceInfo.text)
     core.sound.say(voiceInfo.sound, actor, voiceInfo.text)
     return true
 end
