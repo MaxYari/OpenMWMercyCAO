@@ -14,6 +14,10 @@ A significant overhaul of in-combat NPC behavior for OpenMW. Using custom lua be
 
 Have fun!
 
+## Credit
+
+ElevenLabs-generated voice lines by [vonwolfe](https://next.nexusmods.com/profile/vonwolfe).
+
 ## Mod compatibility
 
 Not compatibly with most mods directly affecting NPC behaviour in combat, unless a compatibility patch is provided by a mod author or here.
@@ -23,10 +27,6 @@ Compatibility patches included here provide a compatibility layer for following 
 [Take Cover](https://www.nexusmods.com/morrowind/mods/54976) by [mym](https://next.nexusmods.com/profile/mym)
 
 Note that compatibility patches are written using Mercy: CAO extension interface (read below).
-
-## Credit
-
-ElevenLabs-generated voice lines by [vonwolfe](https://next.nexusmods.com/profile/vonwolfe).
 
 #### Extending Mercy: CAO
 
