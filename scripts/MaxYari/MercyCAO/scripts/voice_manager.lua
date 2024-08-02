@@ -13,6 +13,7 @@ local customVoiceRecords = require(mp .. "scripts/custom_voice_records")
 
 local types = require("openmw.types")
 local core = require("openmw.core")
+local omwself = require("openmw.self")
 
 local module = {}
 
@@ -28,8 +29,8 @@ module.addVoiceRecords = addVoiceRecords
 
 local function noSpecificFilters(info)
     -- I probably can check the disposition as well for the "filterActorDisposition"
-    local specificFilters = { "filterActorClass", "filterActorFaction", "filterActorId",
-        "filterPlayerCell", "filterPlayerFaction", "isQuestFinished", "isQuestName", "isQuestRestart", "questStage" }
+    local specificFilters = { "filterActorClass", "filterActorFaction", "filterPlayerCell", "filterPlayerFaction",
+        "isQuestFinished", "isQuestName", "isQuestRestart", "questStage" }
     local noFilters = true
     for _, filter in ipairs(specificFilters) do
         if info[filter] then
@@ -55,7 +56,7 @@ local function findRelevantInfos(recordType, race, gender, isBeast)
 
     for _, voiceInfo in pairs(records.infos) do
         -- Need to also filter by enemy race and also accept those that are nil?
-        if voiceInfo.sound and voiceInfo.filterActorRace == race and voiceInfo.filterActorGender == gender and noSpecificFilters(voiceInfo) and beastCheck(voiceInfo, isBeast) then
+        if voiceInfo.sound and voiceInfo.filterActorRace == race and voiceInfo.filterActorGender == gender and (not voiceInfo.filterActorId or voiceInfo.filterActorId == omwself.recordId) and noSpecificFilters(voiceInfo) and beastCheck(voiceInfo, isBeast) then
             --print(gutils.dialogRecordInfoToString(voiceInfo))
             table.insert(fittingInfos, voiceInfo)
         end
@@ -131,7 +132,7 @@ local function say(actor, targetActor, recordType, force)
     lastPickedIndices[recordType] = pickedIndex
 
     local voiceInfo = fittingInfos[pickedIndex]
-    
+
 
     -- Finally say it!
     print("Voiceline to use: ", voiceInfo.sound, voiceInfo.text)

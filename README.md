@@ -91,6 +91,12 @@ state.dt
 
 ```
 
+Note: currently spellcaster's FIGHT behaviours are force to be handled by the vanilla AI. If you want to implement such a behaviour (which should include picking spells, switching between them, casting them etc) - disable the vanilla behaviour for spellcasters flag:
+
+```Lua
+interfaces.MercyCAO.setSpellCastersAreVanilla(false)
+```
+
 If your extension was successfully attached - you should see a `[MercyCAO][...] Found an extension your_extension ...` message printed in the console (f10 lua console or a game process console, not in-game tilda console).
 
 If you are familiar with the concept of behaviour trees here's a visual aid explaining where those extension nodes are injected (stances are not reflected in the image since it's not yet updated):
