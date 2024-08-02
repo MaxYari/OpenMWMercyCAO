@@ -1,6 +1,6 @@
 # Mercy: Combat AI Overhaul
 
-A significant overhaul of in-combat NPC behavior for OpenMW. Using custom lua behavior trees library, with new voice lines and animations. Overhauls Melee NPCs, partially affects ranged and spellcasters. 
+A significant overhaul of in-combat NPC behavior for OpenMW. Using a custom Lua behavior trees library, with new voice lines and animations. Overhauls melee NPCs, partially affects ranged and spellcasters.
 
 ![Demo 1](/imgs/demo1.gif)
 ![Demo 2](/imgs/demo2.gif)
@@ -8,9 +8,9 @@ A significant overhaul of in-combat NPC behavior for OpenMW. Using custom lua be
 
 ## How to install
 
-- Download this repository as an archive and install using Mod Organizer 2. Or manually place the contents of this repository into your ".../Morrowind/Data Files" folder. 
-- Ensure that `MercyCAO Compatibility Patches.omwscripts` is at the very bottom of your Content Files list in OpenMW launcher (you can drag it to reorder).
-- Enable the mod's .omwscript file in "Content Files" tab of the OpenMW launcher.
+- Download this repository as an archive and install using Mod Organizer 2. Or manually place the contents of this repository into your ".../Morrowind/Data Files" folder.
+- Ensure that `MercyCAO Compatibility Patches.omwscripts` is at the very bottom of your Content Files list in the OpenMW launcher (you can drag it to reorder).
+- Enable the mod's .omwscript file in the "Content Files" tab of the OpenMW launcher.
 
 Have fun!
 
@@ -20,40 +20,37 @@ ElevenLabs-generated voice lines by [vonwolfe](https://next.nexusmods.com/profil
 
 ## Mod compatibility
 
-Not compatibly with most mods directly affecting NPC behaviour in combat, unless a compatibility patch is provided by a mod author or here.
+Not compatible with most mods directly affecting NPC behavior in combat, unless a compatibility patch is provided by a mod author or here.
 
-Compatibility patches included here provide a compatibility layer for following mods:
+Compatibility patches included here provide a compatibility layer for the following mods:
 
 [Take Cover](https://www.nexusmods.com/morrowind/mods/54976) by [mym](https://next.nexusmods.com/profile/mym)
 
-Note that compatibility patches are written using Mercy: CAO extension interface (read below).
+Note that compatibility patches are written using the Mercy: CAO extension interface (read below).
 
 ## Extending Mercy: CAO
 
-Mercy provides an interface for extensions. Using this interface its possible to develop new NPC behaviors compatible with Mercy or compatibility patches for other mods.
-First of all Mercy script should be in a load order _before_ your extension. Secondly you should use the extension interface before the first onUpdate call, otherwise Mercy will finish its initialisation without acknowledging your extension. It's not possible to extend Mercy in a middle of it's runtime.
+Mercy provides an interface for extensions. Using this interface, it is possible to develop new NPC behaviors compatible with Mercy or compatibility patches for other mods. First of all, the Mercy script should be in a load order _before_ your extension. Secondly, you should use the extension interface before the first onUpdate call, otherwise, Mercy will finish its initialization without acknowledging your extension. It's not possible to extend Mercy in the middle of its runtime.
 
 Extensions are done using `interfaces.MercyCAO.addExtension(treeName, combatState, stance, extensionObject)`.
-Mercy AI is globally split to 2 different behaviour trees (`treeName` argument. And actually its 3 trees, but let's ignore the 3rd one - it's an auxiliary and doesn't have any extension points):
-- `Locomotion` - A tree responsible for character movement through space - strafing, chasing, moving around e.t.c
-- `Combat` - responsible for attacking - checking range, making quick or long swings, series of attacks e.t.c
-Those trees run in parallel.
+Mercy AI is globally split into two different behavior trees (`treeName` argument. And actually, it's three trees, but let's ignore the third one - it's an auxiliary and doesn't have any extension points):
+- `Locomotion` - A tree responsible for character movement through space - strafing, chasing, moving around, etc.
+- `Combat` - Responsible for attacking - checking range, making quick or long swings, series of attacks, etc.
+These trees run in parallel.
 
-Furtermore all of the behaviours/branches within those trees are grouped within 4 principal combat AI states (`combatState` argument):
-- `STAND_GROUND` - Although technically in a combat state (Combat ai package, in fact Mercy works _only_ when combat package is active) - actor is hesitant to engage, will not rush towards the enemy, will slowly move around a bit, play a warning voice line. If too much time will pass in this state (while enemy is in line of sight) or an enemy will get too close - combat stat will switch to `FIGHT`
-- `FIGHT` - Main engagement mode. Actor will run, strafe, chase, fallback, attack e.t.c. If actor's health gets too low - it _might_ switch to `RETREAT` or `MERCY` state.
-- `RETREAT` - Checks if there are other actors nearby potentially aggressive towards actors enemy - if so - retreats towards them and waits there. Similarly to `STAND_GROUND` - if enemy gets too close - reingages `FIGHT`
-- `MERCY` - Actor asks for mercy, lays down their weapons/items and gets pacified. If Actor is attacked too much during this process - will reingage `FIGHT`
+Furthermore, all of the behaviors/branches within those trees are grouped within four principal combat AI states (`combatState` argument):
+- `STAND_GROUND` - Although technically in a combat state (Combat AI package, in fact Mercy works _only_ when the combat package is active) - the actor is hesitant to engage, will not rush towards the enemy, will slowly move around a bit, play a warning voice line. If too much time passes in this state (while the enemy is in line of sight) or an enemy gets too close - the combat state will switch to `FIGHT`
+- `FIGHT` - Main engagement mode. The actor will run, strafe, chase, fall back, attack, etc. If the actor's health gets too low - it _might_ switch to `RETREAT` or `MERCY` state.
+- `RETREAT` - Checks if there are other actors nearby potentially aggressive towards the actor's enemy - if so - retreats towards them and waits there. Similarly to `STAND_GROUND` - if the enemy gets too close - reengages `FIGHT`
+- `MERCY` - The actor asks for mercy, lays down their weapons/items, and gets pacified. If the actor is attacked too much during this process - will reengage `FIGHT`
 
-Lastly, behaviours within each `combatState` are separated by the current character stance, which can be:
+Lastly, behaviors within each `combatState` are separated by the current character stance, which can be:
 - `Melee` - Character is currently holding a melee weapon
-- `Marksman` - Character is holding marksman weapon
+- `Marksman` - Character is holding a marksman weapon
 - `Spell` - Character is in a spellcasting stance
 - `Any` - Character is in any stance
 
-`extensionObject` is a lua table that implements your behaviour, it's structured in a very similar way to behaviour nodes used internally by Mercy. This table supposed to implement a set of methods that will be called by the behaviour tree when the execution flow reached that part of the tree.
-
-
+`extensionObject` is a Lua table that implements your behavior, it's structured in a very similar way to behavior nodes used internally by Mercy. This table is supposed to implement a set of methods that will be called by the behavior tree when the execution flow reaches that part of the tree.
 
 Interface use example:
 ```Lua
@@ -73,16 +70,16 @@ interfaces.MercyCAO.addExtension("Locomotion", "STAND_GROUND", "Melee", {
    end,
    finish = function(task, state)
       print("My custom extension is done!")
-    end
+   end
 })
 ```
 
-`state` argument is a shared behaviour tree's state object (sometimes called a "blackboard" in other behaviour tree libraries/implementations), its a table of properties and functions to which all of the Mercy: CAO behaviour trees have direct access.
+`state` argument is a shared behavior tree's state object (sometimes called a "blackboard" in other behavior tree libraries/implementations), it's a table of properties and functions to which all of the Mercy: CAO behavior trees have direct access.
 
-There are number of properties you can set on a state object to affect the actor, main ones are:
+There are a number of properties you can set on a state object to affect the actor, main ones are:
 
 ```Lua
--- Velues below are default values. These properties are reset to their defaults EVERY FRAME before the tree runs, so if you want to keep .movement at a specific value - you need to set it every frame, i.e every run() of your extension!
+-- Values below are default values. These properties are reset to their defaults EVERY FRAME before the tree runs, so if you want to keep .movement at a specific value - you need to set it every frame, i.e every run() of your extension!
 state.stance = types.Actor.STANCE.Weapon
 state.run = true
 state.jump = false
@@ -102,25 +99,30 @@ state.dt
 
 ```
 
-Note: currently spellcaster's FIGHT behaviours are force to be handled by the vanilla AI. If you want to implement such a behaviour (which should include picking spells, switching between them, casting them etc) - disable the vanilla behaviour for spellcasters flag:
+Note: currently spellcaster's `FIGHT` behaviors are forced to be handled by the vanilla AI. If you want to implement such a behavior (which should include picking spells, switching between them, casting them, etc.) - disable the vanilla behavior for spellcasters flag:
 
 ```Lua
 interfaces.MercyCAO.setSpellCastersAreVanilla(false)
 ```
 
-If your extension was successfully attached - you should see a `[MercyCAO][...] Found an extension your_extension ...` message printed in the console (f10 lua console or a game process console, not in-game tilda console).
+If your extension was successfully attached - you should see a [MercyCAO][...] Found an extension your_extension ... message printed in the console (f10 Lua console or a game process console, not in-game tilde console).
 
-If you are familiar with the concept of behaviour trees here's a visual aid explaining where those extension nodes are injected (image is old, stances are not reflected):
+If you are familiar with the concept of behavior trees here's a visual aid explaining where those extension nodes are injected (image is old, stances are not reflected):
+
 ![alt text](/imgs/extension.png)
 
-If you want to read about behaviour trees - see my haphazard writeup and some links (and images!) in [this repository](https://github.com/MaxYari/behaviourtreelua2e).
+If you want to read about behavior trees - see my haphazard writeup and some links (and images!) in [this repository](https://github.com/MaxYari/behaviourtreelua2e).
 
 ## MWSE compatibility
 
-This is an OpenMW Lua mod, it's not compatible with MWSE. It's is probably possible to port it since most of the mod is pure Lua, but I'm not familiar with MWSE and am not planning to change that. If you'd like to prot it - feel free to do so. If possible please keep this mod as a dependency.
+This is an OpenMW Lua mod, it's not compatible with MWSE. It's probably possible to port it since most of the mod is pure Lua, but I'm not familiar with MWSE and am not planning to change that. If you'd like to port it - feel free to do so. If possible please keep this mod as a dependency.
 
 ## Appreciation
 
-My thanks go to OpenMW discord community for massively helping me overcome a multitude of Lua hurdles, testing and providing feedback.
+My thanks go to the OpenMW Discord community for massively helping me overcome a multitude of Lua hurdles, testing, and providing feedback.
+
+## Generative AI use disclaimer 
+
+As mentioned before - Eleven Labs was used to generate new voice lines. ChatGPT was used as a coding and writing assistant.
 
 
