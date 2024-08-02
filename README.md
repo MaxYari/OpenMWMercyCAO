@@ -110,7 +110,7 @@ interfaces.MercyCAO.setSpellCastersAreVanilla(false)
 
 If your extension was successfully attached - you should see a `[MercyCAO][...] Found an extension your_extension ...` message printed in the console (f10 lua console or a game process console, not in-game tilda console).
 
-If you are familiar with the concept of behaviour trees here's a visual aid explaining where those extension nodes are injected (stances are not reflected in the image since it's not yet updated):
+If you are familiar with the concept of behaviour trees here's a visual aid explaining where those extension nodes are injected (image is old, stances are not reflected):
 ![alt text](/imgs/extension.png)
 
 If you want to read about behaviour trees - see my haphazard writeup and some links (and images!) in [this repository](https://github.com/MaxYari/behaviourtreelua2e).
