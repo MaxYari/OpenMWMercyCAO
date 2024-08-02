@@ -28,7 +28,7 @@ Compatibility patches included here provide a compatibility layer for following 
 
 Note that compatibility patches are written using Mercy: CAO extension interface (read below).
 
-#### Extending Mercy: CAO
+## Extending Mercy: CAO
 
 Mercy provides an interface for extensions. Using this interface its possible to develop new NPC behaviors compatible with Mercy or compatibility patches for other mods.
 First of all Mercy script should be in a load order _before_ your extension. Secondly you should use the extension interface before the first onUpdate call, otherwise Mercy will finish its initialisation without acknowledging your extension. It's not possible to extend Mercy in a middle of it's runtime.
