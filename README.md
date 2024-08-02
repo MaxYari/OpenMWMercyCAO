@@ -9,9 +9,20 @@ A significant overhaul of in-combat NPC behavior for OpenMW. Using custom lua be
 ## How to install
 
 - Download this repository as an archive and install using Mod Organizer 2. Or manually place the contents of this repository into your ".../Morrowind/Data Files" folder. 
+- Ensure that `MercyCAO Compatibility Patches.omwscripts` is at the very bottom of your Content Files list in OpenMW launcher (you can drag it to reorder).
 - Enable the mod's .omwscript file in "Content Files" tab of the OpenMW launcher.
 
 Have fun!
+
+## Mod compatibility
+
+Not compatibly with most mods directly affecting NPC behaviour in combat, unless a compatibility patch is provided by a mod author or here.
+
+Compatibility patches included here provide a compatibility layer for following mods:
+
+[Take Cover](https://www.nexusmods.com/morrowind/mods/54976) by [mym](https://next.nexusmods.com/profile/mym)
+
+Note that compatibility patches are written using Mercy: CAO extension interface (read below).
 
 ## Credit
 
