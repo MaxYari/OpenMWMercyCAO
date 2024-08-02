@@ -57,8 +57,7 @@ local function ContinuousCondition(config)
         return config.condition(task, state)
     end
 
-    config.start = function(task, state)
-        print("CONT COND STARTED")
+    config.start = function(task, state)        
         if not config.condition(task, state) then
             task:fail()
         else
