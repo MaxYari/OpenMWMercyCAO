@@ -26,8 +26,11 @@ local json = require(mp .. "libs/json")
 local luaRandom = require(mp .. "libs/randomlua")
 ----------------------------------------------------------------------------
 
-
+--- To be or not to be!? ---
 DebugLevel = 0
+----------------------------
+
+
 
 local fCombatDistance = core.getGMST("fCombatDistance")
 local fHandToHandReach = core.getGMST("fHandToHandReach")
@@ -361,6 +364,7 @@ end
 
 
 local spellCastersAreVanilla = true
+local isSpellCaster = selfActor:isSpellCaster()
 
 -- Defining variables used by the main update functions
 StandGroundProbModifier = 1
@@ -401,11 +405,17 @@ local function onUpdate(dt)
    -- Time
    local now = core.getRealTime()
 
+   -- Only modify AI if it's in combat and is melee and not a caster and not dead... and not a vampire (they are also casters)!
+   local activeAiPackage = AI.getActivePackage()
+   if not activeAiPackage then activeAiPackage = { type = nil } end
+   local enemyActor = AI.getActiveTarget("Combat")
+
    -- Sending on Damaged events
-   if damageValue > 0 then
-      gutils.forEachNearbyActor(2000, function(actor)
-         if types.Player.objectIsInstance(actor) or actor == omwself.object then return end
-         actor:sendEvent('FriendDamaged', { source = omwself.object })
+   if damageValue > 0 and enemyActor then
+      gutils.forEachNearbyActor(1200, function(actor)
+         if gutils.isMyFriend(actor) then
+            actor:sendEvent('FriendDamaged', { source = omwself.object, offender = enemyActor })
+         end
       end)
    end
 
@@ -414,17 +424,13 @@ local function onUpdate(dt)
    if lastDeadState ~= nil and lastDeadState ~= deathState then
       if deathState then
          gutils.forEachNearbyActor(1000, function(actor)
-            if types.Player.objectIsInstance(actor) or actor == omwself.object then return end
-            actor:sendEvent('FriendDead', { source = omwself.object })
+            if gutils.isMyFriend(actor) then
+               actor:sendEvent('FriendDead', { source = omwself.object, offender = enemyActor })
+            end
          end)
       end
    end
    lastDeadState = deathState
-
-   -- Only modify AI if it's in combat and is melee and not a caster and not dead... and not a vampire (they are also casters)!
-   local activeAiPackage = AI.getActivePackage()
-   if not activeAiPackage then activeAiPackage = { type = nil } end
-   local enemyActor = AI.getActiveTarget("Combat")
 
 
 
@@ -451,16 +457,18 @@ local function onUpdate(dt)
    end
 
    -- Check for reatreating/mercy
-   local scared = isSelfScared(damageValue)
-   if (state.combatState == enums.COMBAT_STATE.FIGHT or state.combatState == enums.COMBAT_STATE.STAND_GROUND) and scared then
-      local potentialStates = {}
-      if not retreatedOnce then table.insert(potentialStates, enums.COMBAT_STATE.RETREAT) end
-      if not askedForMercyOnce then table.insert(potentialStates, enums.COMBAT_STATE.MERCY) end
-      if #potentialStates > 0 then
-         local newState = potentialStates[math.random(1, #potentialStates)]
-         state.combatState = newState
-         if state.combatState == enums.COMBAT_STATE.RETREAT then retreatedOnce = true end
-         if state.combatState == enums.COMBAT_STATE.MERCY then askedForMercyOnce = true end
+   if (state.combatState == enums.COMBAT_STATE.FIGHT or state.combatState == enums.COMBAT_STATE.STAND_GROUND) then
+      local scared = isSelfScared(damageValue)
+      if scared then
+         local potentialStates = {}
+         if not retreatedOnce then table.insert(potentialStates, enums.COMBAT_STATE.RETREAT) end
+         if not askedForMercyOnce then table.insert(potentialStates, enums.COMBAT_STATE.MERCY) end
+         if #potentialStates > 0 then
+            local newState = potentialStates[math.random(1, #potentialStates)]
+            state.combatState = newState
+            if state.combatState == enums.COMBAT_STATE.RETREAT then retreatedOnce = true end
+            if state.combatState == enums.COMBAT_STATE.MERCY then askedForMercyOnce = true end
+         end
       end
    end
 
@@ -484,7 +492,7 @@ local function onUpdate(dt)
       shouldOverrideAI = false
    end
    -- Short circuit for mages in combat - temporary. TO DO: will also be nice to make this toggleable for expansion mods
-   if state.combatState == enums.COMBAT_STATE.FIGHT and selfActor:isSpellCaster() and spellCastersAreVanilla then
+   if state.combatState == enums.COMBAT_STATE.FIGHT and isSpellCaster and spellCastersAreVanilla then
       shouldOverrideAI = false
    end
 
@@ -609,14 +617,21 @@ end
 -- Also if you miss with ranged - theyll ignore that as well
 local function onFriendDamaged(e)
    --gutils.print("Oh no, ", e.source.recordId, " got damaged!")
+   gutils.print("Friend " .. e.source.recordId .. " was attacked", 1)
+   if selfActor:isDead() then return end
    if state.combatState == enums.COMBAT_STATE.STAND_GROUND then
       state.combatState = enums.COMBAT_STATE.FIGHT
+   end
+   if lastAiPackage.type ~= "Combat" then
+      gutils.print("Friend " .. e.source.recordId .. " was attacked, starting a combat AI package", 1)
+      AI.startPackage({ type = 'Combat', target = e.offender })
    end
 end
 
 local avengeSaid = false
 local function onFriendDead(e)
-   --gutils.print("Oh no, ", e.source.recordId, " is dead!")
+   gutils.print("Oh no, friend: ", e.source.recordId, " is dead!", 1)
+   if selfActor:isDead() then return end
    if state.combatState == enums.COMBAT_STATE.FIGHT and gutils.isMyFriend(e.source) and math.random() < AvengeShoutProb and not avengeSaid then
       voiceManager.say(omwself, nil, "FriendDead")
       avengeSaid = true

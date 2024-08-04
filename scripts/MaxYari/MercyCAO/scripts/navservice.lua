@@ -120,14 +120,16 @@ local function NavigationService(config)
         local moveVec = movePos - omwself.position
         local navMeshPosition = nearby.findNearestNavMeshPosition(movePos)
 
+        if not navMeshPosition then
+            return false, "No nearest navmesh point"
+        end
+
         local navMeshMoveVec = navMeshPosition - omwself.position
         local navMeshDist = navMeshMoveVec:dot(moveVec:normalize()) -- Projection onto a move vector
 
         local endPosDifference = (movePos - navMeshPosition):length()
 
-        if not navMeshPosition then
-            return false, "No nearest navmesh point"
-        elseif navMeshDist < moveVec:length() * 0.9 then
+        if navMeshDist < moveVec:length() * 0.9 then
             return false, "Navmesh position is too close to the current position"
         elseif endPosDifference > gutils.minHorizontalHalfSize(self.bounds) * 0.9 then
             return false, "Navmesh position is too far from the desired move position"

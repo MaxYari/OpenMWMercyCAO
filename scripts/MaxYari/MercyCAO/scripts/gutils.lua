@@ -320,7 +320,6 @@ function Actor:__index(key)
     end
 end
 
-
 function Actor:getDumpableInventoryItems()
     -- data.actor, data.position
     local items = {}
@@ -523,13 +522,15 @@ end
 module.wasMyTarget = wasMyTarget
 
 local function isMyFriend(actor)
+    if actor.id == omwself.id then return false end
+    if types.Player.objectIsInstance(actor) then return false end
     local sameType = true
     if types.NPC.objectIsInstance(omwself) and not types.NPC.objectIsInstance(actor) then
         sameType = false
     end
     local fightVal = types.Actor.stats.ai.fight(actor)
-    return actor.id ~= omwself.id and not types.Player.objectIsInstance(actor) and sameType and
-        not wasMyTarget(actor) and fightVal.modified >= BaseFriendFightVal
+    return actor.recordId == omwself.recordId or (sameType and
+        not wasMyTarget(actor) and fightVal.modified >= BaseFriendFightVal)
 end
 module.isMyFriend = isMyFriend
 

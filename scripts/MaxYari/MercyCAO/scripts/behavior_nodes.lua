@@ -57,7 +57,7 @@ local function ContinuousCondition(config)
         return config.condition(task, state)
     end
 
-    config.start = function(task, state)        
+    config.start = function(task, state)
         if not config.condition(task, state) then
             task:fail()
         else
@@ -83,7 +83,7 @@ end
 BT.register("InMarksmanStance", InMarksmanStance)
 
 local function InMeleeStance(config)
-    config.condition = function(task, state)        
+    config.condition = function(task, state)
         return state.detStance == gutils.Actor.DET_STANCE.Melee
     end
 
@@ -93,7 +93,7 @@ end
 BT.register("InMeleeStance", InMeleeStance)
 
 local function InSpellStance(config)
-    config.condition = function(task, state)        
+    config.condition = function(task, state)
         return state.detStance == gutils.Actor.DET_STANCE.Spell
     end
 
@@ -128,7 +128,7 @@ local function ChaseTarget(config)
             gutils.print("Chase Target aborted due to the actor being stuck on a door.", 1)
             return task:fail()
         end
-        
+
         if #navService.path == 0 then
             gutils.print("Chase Target aborted due to unable to calculate a path.", 1)
             return task:fail()
@@ -626,7 +626,7 @@ function EnemyIsRanged(config)
         local enemyActor = gutils.Actor:new(state.enemyActor)
         local detStance = enemyActor:getDetailedStance()
         local enemyIsRanged = detStance == gutils.Actor.DET_STANCE.Spell or detStance == gutils.Actor.DET_STANCE
-        .Marksman
+            .Marksman
 
         if enemyIsRanged then
             task.rangedDetectedTime = task.rangedDetectedTime or core.getRealTime()
@@ -883,18 +883,24 @@ function SayGroup(config)
 
     config.start = function(task, state)
         local maxVoices = p.maxVoices()
+        local tooManyVoices = false
 
         gutils.forEachNearbyActor(700, function(actor)
             if core.sound.isSayActive(actor) then
                 voices = voices + 1
                 if voices > maxVoices then
-                    return task:fail()
+                    tooManyVoices = true
+                    return
                 end
             end
         end)
 
-        voiceManager.say(omwself, state.enemyActor, p.recordType(), p.force())
-        return task:success()
+        if tooManyVoices then
+            return task:fail()
+        else
+            voiceManager.say(omwself, state.enemyActor, p.recordType(), p.force())
+            return task:success()
+        end
     end
 
     return BT.Task:new(config)
