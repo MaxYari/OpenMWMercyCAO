@@ -410,6 +410,22 @@ local function onUpdate(dt)
    if not activeAiPackage then activeAiPackage = { type = nil } end
    local enemyActor = AI.getActiveTarget("Combat")
 
+   -- Storing combat targets in history
+   gutils.addTargetsToHistory(I.AI.getTargets("Combat"))
+
+   -- Should we control character with Mercy?
+   -- We are not in a combat state - the engine will handle AI
+   local shouldOverrideAI = true
+   local detStance = selfActor:getDetailedStance()
+   if activeAiPackage.type ~= "Combat" or types.Actor.isDead(activeAiPackage.target) or selfActor:isDead() then
+      state.combatState = enums.COMBAT_STATE.NO_STATE
+      shouldOverrideAI = false
+   end
+   -- Short circuit for mages in combat - temporary. TO DO: will also be nice to make this toggleable for expansion mods
+   if state.combatState == enums.COMBAT_STATE.FIGHT and isSpellCaster and spellCastersAreVanilla then
+      shouldOverrideAI = false
+   end
+
    -- Sending on Damaged events
    if damageValue > 0 and enemyActor then
       gutils.forEachNearbyActor(1200, function(actor)
@@ -432,11 +448,6 @@ local function onUpdate(dt)
    end
    lastDeadState = deathState
 
-
-
-   -- Storing combat targets in history
-   gutils.addTargetsToHistory(I.AI.getTargets("Combat"))
-
    -- When we switch to combat - determine if we want to be hesitant (stand ground) or engage right away
    if lastAiPackage.type ~= activeAiPackage.type and activeAiPackage.type == "Combat" then
       -- Initialising combat state
@@ -456,7 +467,7 @@ local function onUpdate(dt)
       end
    end
 
-   -- Check for reatreating/mercy
+   -- Check for retreating/mercy
    if (state.combatState == enums.COMBAT_STATE.FIGHT or state.combatState == enums.COMBAT_STATE.STAND_GROUND) then
       local scared = isSelfScared(damageValue)
       if scared then
@@ -472,29 +483,7 @@ local function onUpdate(dt)
       end
    end
 
-   -- If Ai override state just changed but AI package was already combat for some time - we switched mid combat, no standing ground
-   -- if AiOverrideState and AiOverrideState ~= lastAiOverrideState then
-   --    core.sound.stopSay(omwself);
-   --    -- If ai override happened in middle of combat - ensure that we won't go into STAND_GROUND state
-   --    if lastAiPackage.type == "Combat" then
-   --       state.combatState = enums.COMBAT_STATE.FIGHT
-   --    end
-   -- end
-
    lastAiPackage = activeAiPackage
-
-   -- Should we control character with Mercy?
-   -- We are not in a combat state - the engine will handle AI
-   local shouldOverrideAI = true
-   local detStance = selfActor:getDetailedStance()
-   if activeAiPackage.type ~= "Combat" or types.Actor.isDead(activeAiPackage.target) or selfActor:isDead() then
-      state.combatState = enums.COMBAT_STATE.NO_STATE
-      shouldOverrideAI = false
-   end
-   -- Short circuit for mages in combat - temporary. TO DO: will also be nice to make this toggleable for expansion mods
-   if state.combatState == enums.COMBAT_STATE.FIGHT and isSpellCaster and spellCastersAreVanilla then
-      shouldOverrideAI = false
-   end
 
    -- Disabling AI so everything can be controlled by ~Mercy~
    omwself:enableAI(not shouldOverrideAI)
