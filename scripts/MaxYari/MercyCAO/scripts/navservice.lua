@@ -304,7 +304,7 @@ local function NavigationService(config)
                 -- Detecting being stuck and changing avoidance irection
                 self.posToVelSampler:sample(omwself.position)
                 if self.posToVelSampler.warmedUp and self.posToVelSampler:mean():length() < opts.desiredSpeed * 0.1 then
-                    gutils.print("It seems like we are stuck in here, canging obstacle avoidance direction")
+                    gutils.print("It seems like we are stuck in here, canging obstacle avoidance direction", 1)
                     self.closestObs:flipAvoidanceDirection()
                     self.posToVelSampler = gutils.PosToVelSampler:new(self.posToVelSampler.time_window)
                 end

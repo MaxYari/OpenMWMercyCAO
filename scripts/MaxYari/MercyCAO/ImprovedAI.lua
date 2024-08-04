@@ -13,6 +13,7 @@ require(mp .. "scripts/behavior_nodes")
 local omwself = require('openmw.self')
 local selfActor = gutils.Actor:new(omwself)
 local core = require('openmw.core')
+local nearby = require("openmw.nearby")
 local AI = require('openmw.interfaces').AI
 local vfs = require('openmw.vfs')
 local util = require('openmw.util')
@@ -428,7 +429,7 @@ local function onUpdate(dt)
 
    -- Sending on Damaged events
    if damageValue > 0 and enemyActor then
-      gutils.forEachNearbyActor(1200, function(actor)
+      gutils.forEachNearbyActor(2000, function(actor)
          if gutils.isMyFriend(actor) then
             actor:sendEvent('FriendDamaged', { source = omwself.object, offender = enemyActor })
          end
@@ -608,12 +609,20 @@ local function onFriendDamaged(e)
    --gutils.print("Oh no, ", e.source.recordId, " got damaged!")
    gutils.print("Friend " .. e.source.recordId .. " was attacked", 1)
    if selfActor:isDead() then return end
+
    if state.combatState == enums.COMBAT_STATE.STAND_GROUND then
       state.combatState = enums.COMBAT_STATE.FIGHT
    end
    if lastAiPackage.type ~= "Combat" then
-      gutils.print("Friend " .. e.source.recordId .. " was attacked, starting a combat AI package", 1)
-      AI.startPackage({ type = 'Combat', target = e.offender })
+      local raycast = nearby.castRay(gutils.getActorLookRayPos(omwself),
+         gutils.getActorLookRayPos(e.source), { collisionType = nearby.COLLISION_TYPE.World + nearby.COLLISION_TYPE.Door + nearby.COLLISION_TYPE.HeightMap})
+      
+      if not raycast.hitObject then
+         gutils.print("Friend " .. e.source.recordId .. " was attacked, starting a combat AI package", 1)
+         AI.startPackage({ type = 'Combat', target = e.offender })
+      else 
+         gutils.print("Line of sight check hit "..raycast.hitObject.recordId,1)
+      end
    end
 end
 

@@ -367,6 +367,12 @@ function Actor:isWarrior()
     return not self:isSpellCaster() and not self:isMarksman()
 end
 
+function Actor:isAGuard()
+    if not types.NPC.objectIsInstance(self.gameObject) then return false end
+    local className = types.NPC.record(self.gameObject.recordId).class
+    return className == "guard"
+end
+
 function Actor:getDetailedStance()
     local stance = self:getStance()
     if stance == types.Actor.STANCE.Nothing then
@@ -398,6 +404,8 @@ function Actor:canOpenDoor(door)
 end
 
 module.Actor = Actor
+
+local selfActor = Actor:new(omwself)
 
 --------------------------------------------------------------------------------
 
@@ -494,8 +502,7 @@ module.getFightDispositionBias = getFightDispositionBias
 
 
 local function imAGuard()
-    local record = types.NPC.record(omwself)
-    return record and record.class == "guard"
+    return selfActor:isAGuard()
 end
 module.imAGuard = imAGuard
 
@@ -524,12 +531,14 @@ module.wasMyTarget = wasMyTarget
 local function isMyFriend(actor)
     if actor.id == omwself.id then return false end
     if types.Player.objectIsInstance(actor) then return false end
+    local wActor = Actor:new(actor)
+    
     local sameType = true
     if types.NPC.objectIsInstance(omwself) and not types.NPC.objectIsInstance(actor) then
         sameType = false
     end
     local fightVal = types.Actor.stats.ai.fight(actor)
-    return actor.recordId == omwself.recordId or (sameType and
+    return actor.recordId == omwself.recordId or (selfActor:isAGuard() and wActor:isAGuard()) or (sameType and
         not wasMyTarget(actor) and fightVal.modified >= BaseFriendFightVal)
 end
 module.isMyFriend = isMyFriend

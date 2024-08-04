@@ -144,7 +144,7 @@ local function say(actor, targetActor, recordType, force)
 
 
     -- Finally say it!
-    print("Voiceline to use: ", voiceInfo.sound, voiceInfo.text, tostring(voiceInfo.filterActorId),voiceInfo.id)
+    -- print("Voiceline to use: ", voiceInfo.sound, voiceInfo.text, tostring(voiceInfo.filterActorId),voiceInfo.id)
     core.sound.say(voiceInfo.sound, actor, voiceInfo.text)
     return true
 end
