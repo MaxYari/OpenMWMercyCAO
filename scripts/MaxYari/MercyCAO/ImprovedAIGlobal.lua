@@ -14,6 +14,8 @@ return {
             local items = actor:getDumpableInventoryItems()
             for _, item in pairs(items) do
                 item:teleport(data.actorObject.cell, data.position, { onGround = true })
+                item.owner.factionId = nil
+                item.owner.recordId = nil
                 ::continue::
             end
         end,
