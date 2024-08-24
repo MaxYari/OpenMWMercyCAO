@@ -73,7 +73,6 @@ end
 local lastPickedIndices = {}
 
 
--- TO DO: introduce vanilla lines into the custom ones and add voice target gender filter
 local function say(actor, targetActor, recordType, force)
     if not actor then
         error("Say was called without an actor")

@@ -210,6 +210,16 @@ local function findField(dictionary, value)
 end
 module.findField = findField
 
+local function listContains(list, value)
+    for ind, val in ipairs(list) do
+        if val == value then
+            return ind
+        end
+    end
+    return nil
+end
+module.listContains = listContains
+
 local function cache(fn, delay)
     delay = delay or 0.25 -- default delay is 0.25 seconds
     local lastExecution = 0

@@ -7,7 +7,7 @@ local itemutil = require(mp .. "scripts/item_util")
 local enums = require(mp .. "scripts/enums")
 local animManager = require(mp .. "scripts/anim_manager")
 local voiceManager = require(mp .. "scripts/voice_manager")
-require(mp .. "scripts/behavior_nodes")
+local EventsManager = require(mp .. "scripts/events_manager")
 
 -- OpenMW libs
 local omwself = require('openmw.self')
@@ -22,6 +22,10 @@ local I = require('openmw.interfaces')
 
 -- 3rd party libs
 -- Setup important global functions for the behaviourtree 2e module to use--
+_BehaviourTreeImports = {
+   loadCodeInScope = util.loadCode,
+   clock = core.getRealTime
+}
 local BT = require('scripts.behaviourtreelua2e.lib.behaviour_tree')
 local json = require(mp .. "libs/json")
 local luaRandom = require(mp .. "libs/randomlua")
@@ -31,10 +35,22 @@ local luaRandom = require(mp .. "libs/randomlua")
 DebugLevel = 0
 ----------------------------
 
+Events = EventsManager:new()
 
+--- Init custom behaviour nodes
+require(mp .. "scripts/behavior_nodes")
 
+-- GSMTs
 local fCombatDistance = core.getGMST("fCombatDistance")
 local fHandToHandReach = core.getGMST("fHandToHandReach")
+
+local NavigationService = require(mp .. "scripts/navservice")
+local navService = NavigationService({
+   cacheDuration = 1,
+   targetPosDeadzone = 50,
+   pathingDeadzone = 35
+})
+
 
 if core.API_REVISION < 64 then
    error(
@@ -57,6 +73,7 @@ local state = {
    COMBAT_STATE = enums.COMBAT_STATE,
    attackState = enums.ATTACK_STATE.NO_STATE,
    combatState = enums.COMBAT_STATE.NO_STATE,
+   navService = navService,
    attackGroup = nil,
    staggerGroup = nil,
    dt = 0,
@@ -360,8 +377,6 @@ end
 ----------------------------------------------------------------------------------------------------------------
 ----------------------------------------------------------------------------------------------------------------
 
--- TO DO: Stance conditions in the behaviour tree should be continuous conditions, otherwise things get stuck inside an infinite vanilla behavior task
-
 
 
 local spellCastersAreVanilla = true
@@ -379,6 +394,8 @@ AvengeShoutProb = 0.5
 -- CanGoHamProb = 1
 -- BaseFriendFightVal = 30
 -- AvengeShoutProb = 1
+local notargetGracePeriod = 0.25
+local notargetDetectedAt = nil
 local lastWeaponRecord = { id = "_" }
 local lastAiPackage = { type = nil }
 local lastHealth = selfActor.stats.dynamic:health().current
@@ -398,7 +415,7 @@ local function onUpdate(dt)
    end
 
    -- Always track HP, for damage events
-   local currentHealth = selfActor.stats.dynamic:health().current
+   local currentHealth = types.Actor.stats.dynamic.health(omwself).current
    local damageValue = lastHealth - currentHealth
    state.damageValue = damageValue
    lastHealth = currentHealth
@@ -418,14 +435,25 @@ local function onUpdate(dt)
    -- We are not in a combat state - the engine will handle AI
    local shouldOverrideAI = true
    local detStance = selfActor:getDetailedStance()
-   if activeAiPackage.type ~= "Combat" or types.Actor.isDead(activeAiPackage.target) or selfActor:isDead() then
-      state.combatState = enums.COMBAT_STATE.NO_STATE
+   if activeAiPackage.type ~= "Combat" or not enemyActor or types.Actor.isDead(enemyActor) or selfActor:isDead() then
       shouldOverrideAI = false
    end
-   -- Short circuit for mages in combat - temporary. TO DO: will also be nice to make this toggleable for expansion mods
+   -- Short circuit for mages in combat - temporary.
    if state.combatState == enums.COMBAT_STATE.FIGHT and isSpellCaster and spellCastersAreVanilla then
       shouldOverrideAI = false
    end
+   -- A small grace period when an empty target is detected in a cobat package. Allows engine to clean up.
+   AI.forEachPackage(function(package)
+      if package.type == "Combat" and not package.target and not notargetDetectedAt then
+         notargetDetectedAt = now
+      end
+   end)
+   if notargetDetectedAt and now - notargetDetectedAt <= notargetGracePeriod then
+      notargetDetectedAt = nil
+      shouldOverrideAI = false
+   end
+
+
 
    -- Sending on Damaged events
    if damageValue > 0 and enemyActor then
@@ -447,13 +475,16 @@ local function onUpdate(dt)
          end)
       end
    end
-   lastDeadState = deathState
+
 
    -- When we switch to combat - determine if we want to be hesitant (stand ground) or engage right away
+   if activeAiPackage.type ~= "Combat" then
+      state.combatState = enums.COMBAT_STATE.NO_STATE
+   end
    if lastAiPackage.type ~= activeAiPackage.type and activeAiPackage.type == "Combat" then
       -- Initialising combat state
       local isGuard = gutils.imAGuard()
-      local fightBias = selfActor.stats.ai:fight().modified
+      local fightBias = types.Actor.stats.ai.fight(omwself).modified
       local dispBias = gutils.getFightDispositionBias(omwself, enemyActor)
       local fightValue = fightBias + dispBias
       local standGroundProb = util.clamp(util.remap(fightValue, 85, 100, 0.9, 0), 0, 0.9)
@@ -485,6 +516,14 @@ local function onUpdate(dt)
    end
 
    lastAiPackage = activeAiPackage
+   lastDeadState = deathState
+
+   if enemyActor and state.range then
+      state.navService:setTargetPos(enemyActor.position)
+      if #state.navService.path == 0 or (state.navService.path[#state.navService.path] - enemyActor.position):length() > state.range then
+         shouldOverrideAI = false
+      end
+   end
 
    -- Disabling AI so everything can be controlled by ~Mercy~
    omwself:enableAI(not shouldOverrideAI)
@@ -603,7 +642,7 @@ end
 -- Events from other actors -------------------------------------------------------
 -----------------------------------------------------------------------------------
 
--- TO DO: Test this again, last time I was fighting vanilla ai actor - friends were ignoring that.
+
 -- Also if you miss with ranged - theyll ignore that as well
 local function onFriendDamaged(e)
    --gutils.print("Oh no, ", e.source.recordId, " got damaged!")
@@ -615,13 +654,14 @@ local function onFriendDamaged(e)
    end
    if lastAiPackage.type ~= "Combat" then
       local raycast = nearby.castRay(gutils.getActorLookRayPos(omwself),
-         gutils.getActorLookRayPos(e.source), { collisionType = nearby.COLLISION_TYPE.World + nearby.COLLISION_TYPE.Door + nearby.COLLISION_TYPE.HeightMap})
-      
+         gutils.getActorLookRayPos(e.source),
+         { collisionType = nearby.COLLISION_TYPE.World + nearby.COLLISION_TYPE.Door + nearby.COLLISION_TYPE.HeightMap })
+
       if not raycast.hitObject then
          gutils.print("Friend " .. e.source.recordId .. " was attacked, starting a combat AI package", 1)
          AI.startPackage({ type = 'Combat', target = e.offender })
-      else 
-         gutils.print("Line of sight check hit "..raycast.hitObject.recordId,1)
+      else
+         gutils.print("Line of sight check hit " .. raycast.hitObject.recordId, 1)
       end
    end
 end
@@ -704,7 +744,8 @@ local interface = {
       if state == true then error("You are not allowed to set spellCastersAreVanilla to true, only to false.") end
       spellCastersAreVanilla = state
    end,
-   addVoiceRecords = voiceManager.addVoiceRecords
+   addVoiceRecords = voiceManager.addVoiceRecords,
+   Events = Events
 }
 
 
@@ -714,7 +755,19 @@ return {
    engineHandlers = {
       onUpdate = onUpdate,
    },
-   eventHandlers = { FriendDamaged = onFriendDamaged, FriendDead = onFriendDead },
+   eventHandlers = {
+      FriendDamaged = function(...)
+         Events:emit("FriendDamaged", ...)
+         onFriendDamaged(...)
+      end,
+      FriendDead = function(...)
+         Events:emit("FriendDead", ...)
+         onFriendDead(...)
+      end,
+      PlayerUse = function(...)
+         Events:emit("PlayerUse", ...)
+      end
+   },
    interfaceName = "MercyCAO",
    interface = interface
 }

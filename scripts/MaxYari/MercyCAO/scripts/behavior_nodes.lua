@@ -3,7 +3,7 @@ local mp = "scripts/MaxYari/MercyCAO/"
 -- Mod files
 local gutils = require(mp .. "scripts/gutils")
 local moveutils = require(mp .. "scripts/movementutils")
-local NavigationService = require(mp .. "scripts/navservice")
+
 local voiceManager = require(mp .. "scripts/voice_manager")
 local animManager = require(mp .. "scripts/anim_manager")
 local enums = require(mp .. "scripts/enums")
@@ -17,18 +17,21 @@ local util = require('openmw.util')
 local types = require('openmw.types')
 local nearby = require('openmw.nearby')
 local animation = require('openmw.animation')
+local I = require('openmw.interfaces')
 
-_BehaviourTreeImports = {
-    loadCodeInScope = util.loadCode,
-    clock = core.getRealTime
-}
+
+if not Events and I.MercyCAO then Events = I.MercyCAO.Events end
+
+
 local BT = require('scripts.behaviourtreelua2e.lib.behaviour_tree')
 
+local NavigationService = require(mp .. "scripts/navservice")
 local navService = NavigationService({
     cacheDuration = 1,
     targetPosDeadzone = 50,
     pathingDeadzone = 35
 })
+
 
 -- Custom behaviours ------------------
 ---------------------------------------
@@ -118,18 +121,26 @@ local function ChaseTarget(config)
             return task:fail()
         end
 
-        navService:setTargetPos(task.targetActor.position)
-        local movement, sideMovement, run, lookDirection = navService:run({
+        local nav
+        if task.targetActor == state.enemyActor then
+            -- If target is the same as enemyActor - navigation was already calculated in the main loop - use that
+            nav = state.navService
+        else
+            nav = navService
+            nav.setTargetPos(task.targetActor.position)
+        end
+        
+        local movement, sideMovement, run, lookDirection = nav:run({
             desiredSpeed = task.desiredSpeed,
             ignoredObstacleObject = task
                 .targetActor
         })
-        if navService.doorStuck then
+        if nav.doorStuck then
             gutils.print("Chase Target aborted due to the actor being stuck on a door.", 1)
             return task:fail()
         end
 
-        if #navService.path == 0 then
+        if #nav.path == 0 then
             gutils.print("Chase Target aborted due to unable to calculate a path.", 1)
             return task:fail()
         end
@@ -137,7 +148,7 @@ local function ChaseTarget(config)
         local proximity = 0
         local distance = gutils.getDistanceToBounds(task.targetActor, omwself)
         if props.proximity then proximity = props.proximity() end
-        if distance <= proximity or navService:isPathCompleted() then
+        if distance <= proximity or nav:isPathCompleted() then
             return task:success()
         end
 
@@ -190,7 +201,7 @@ function MoveInDirection(config)
         local dirToEnemy = (state.enemyActor.position - omwself.object.position):normalize()
         local moveDir = moveutils.directionRelativeToVec(dirToEnemy, props.direction())
 
-        local canMove, reason = navService:canMoveInDirection(moveDir)
+        local canMove, reason = state.navService:canMoveInDirection(moveDir)
 
         local shouldAbort = false
 
@@ -270,7 +281,7 @@ function JumpInDirection(config)
         local dirToEnemy = (state.enemyActor.position - omwself.object.position):normalize()
         local moveDir = moveutils.directionRelativeToVec(dirToEnemy, props.direction())
 
-        local canMove, reason = navService:canMoveInDirection(moveDir, types.Actor.getRunSpeed(omwself))
+        local canMove, reason = state.navService:canMoveInDirection(moveDir, types.Actor.getRunSpeed(omwself))
 
         if not canMove then
             gutils.print("Jump aborted due to: " .. reason)
@@ -567,11 +578,30 @@ BT.register("RetreatBreaker", RetreatBreaker)
 function PlayerInsolence(config)
     local p = config.properties
 
+    local triggerStarteAt = nil
+
+    local onPlayerUse = function(e, data)
+        if e ~= "PlayerUse" then return end
+
+        if data.use > 0 and gutils.listContains(I.AI.getTargets("Combat"), data.source) and not triggerStarteAt then
+            -- This player is one of our targets - get triggered
+            triggerStarteAt = core.getRealTime()
+        end
+    end
+
+    config.registered = function(task, state)
+        triggerStarteAt = nil
+
+        -- Register event that will catch the player's use
+        Events:addEventHandler(onPlayerUse)
+    end
+
     config.shouldRun = function(task, state)
         if task.started then return true end
 
         if not state.staringProgress then state.staringProgress = 0 end
 
+        local now = core.getRealTime()
         local distance = gutils.getDistanceToBounds(omwself, state.enemyActor)
 
         local raycast = nearby.castRay(gutils.getActorLookRayPos(omwself),
@@ -587,6 +617,10 @@ function PlayerInsolence(config)
 
         -- Check if triggered by enemy damage
         if p.triggerOnDamage() and state.damageValue > 0 then
+            triggerStarteAt = now
+        end
+
+        if triggerStarteAt and now - triggerStarteAt >= p.reactionTime() then
             return true
         end
 
@@ -599,6 +633,11 @@ function PlayerInsolence(config)
 
     config.finish = function(task, state)
         task.started = false
+    end
+
+    config.deregistered = function(task, state)
+        -- deregister that event
+        Events:removeEventHandler(onPlayerUse)
     end
 
     return BT.InterruptDecorator:new(config)
