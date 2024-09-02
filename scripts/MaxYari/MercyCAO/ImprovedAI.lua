@@ -414,6 +414,21 @@ local function onUpdate(dt)
       firstUpdate = false
    end
 
+   -- Only modify AI if it's in combat!
+   local activeAiPackage = AI.getActivePackage()
+   if not activeAiPackage then activeAiPackage = { type = nil } end
+   
+   -- Short circuit out of here if not in Combat state, this is done for the sake of optimisation since currently any access to
+   -- lua API is prone to excessive memory allocations.
+   if activeAiPackage.type ~= "Combat" then
+      state.combatState = enums.COMBAT_STATE.NO_STATE
+      lastAiPackage = activeAiPackage
+      omwself:enableAI(true)
+      return
+   end
+
+   local enemyActor = AI.getActiveTarget("Combat")
+
    -- Always track HP, for damage events
    local currentHealth = types.Actor.stats.dynamic.health(omwself).current
    local damageValue = lastHealth - currentHealth
@@ -423,10 +438,7 @@ local function onUpdate(dt)
    -- Time
    local now = core.getRealTime()
 
-   -- Only modify AI if it's in combat and is melee and not a caster and not dead... and not a vampire (they are also casters)!
-   local activeAiPackage = AI.getActivePackage()
-   if not activeAiPackage then activeAiPackage = { type = nil } end
-   local enemyActor = AI.getActiveTarget("Combat")
+   
 
    -- Storing combat targets in history
    gutils.addTargetsToHistory(I.AI.getTargets("Combat"))
@@ -478,9 +490,6 @@ local function onUpdate(dt)
 
 
    -- When we switch to combat - determine if we want to be hesitant (stand ground) or engage right away
-   if activeAiPackage.type ~= "Combat" then
-      state.combatState = enums.COMBAT_STATE.NO_STATE
-   end
    if lastAiPackage.type ~= activeAiPackage.type and activeAiPackage.type == "Combat" then
       -- Initialising combat state
       local isGuard = gutils.imAGuard()
@@ -515,15 +524,15 @@ local function onUpdate(dt)
       end
    end
 
-   lastAiPackage = activeAiPackage
-   lastDeadState = deathState
-
-   if enemyActor and state.range then
+   if enemyActor then
       state.navService:setTargetPos(enemyActor.position)
-      if #state.navService.path == 0 or (state.navService.path[#state.navService.path] - enemyActor.position):length() > state.range then
+      if #state.navService.path == 0 or (state.range and (state.navService.path[#state.navService.path] - enemyActor.position):length() > state.range) then
          shouldOverrideAI = false
       end
    end
+
+   lastAiPackage = activeAiPackage
+   lastDeadState = deathState
 
    -- Disabling AI so everything can be controlled by ~Mercy~
    omwself:enableAI(not shouldOverrideAI)

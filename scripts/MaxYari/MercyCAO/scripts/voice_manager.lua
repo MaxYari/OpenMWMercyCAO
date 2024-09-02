@@ -144,7 +144,9 @@ local function say(actor, targetActor, recordType, force)
 
     -- Finally say it!
     -- print("Voiceline to use: ", voiceInfo.sound, voiceInfo.text, tostring(voiceInfo.filterActorId),voiceInfo.id)
-    core.sound.say(voiceInfo.sound, actor, voiceInfo.text)
+    -- core.sound.say(voiceInfo.sound, actor, voiceInfo.text)
+    -- say doesnt respect the subtitle setting for some reason, so rather force no subtitles here, since most of the voice lines have none anyway.
+    core.sound.say(voiceInfo.sound, actor)
     return true
 end
 

@@ -21,7 +21,9 @@ gutils.print("Hi! Mercy: CAO BETA is now E-N-G-A-G-E-D", 0)
 local function onUpdate(dt)
     local use = omwself.controls.use
     for _, actor in ipairs(nearby.actors) do
-        actor:sendEvent('PlayerUse', { source = selfObject, use = use })
+        if types.NPC.objectIsInstance(actor) then
+            actor:sendEvent('PlayerUse', { source = selfObject, use = use })
+        end
     end
 
     -- Some experimental stuff

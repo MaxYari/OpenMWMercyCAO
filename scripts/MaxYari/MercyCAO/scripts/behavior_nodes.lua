@@ -127,7 +127,7 @@ local function ChaseTarget(config)
             nav = state.navService
         else
             nav = navService
-            nav.setTargetPos(task.targetActor.position)
+            nav:setTargetPos(task.targetActor.position)
         end
         
         local movement, sideMovement, run, lookDirection = nav:run({
