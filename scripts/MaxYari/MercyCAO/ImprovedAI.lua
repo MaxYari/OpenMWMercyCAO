@@ -417,7 +417,7 @@ local function onUpdate(dt)
    -- Only modify AI if it's in combat!
    local activeAiPackage = AI.getActivePackage()
    if not activeAiPackage then activeAiPackage = { type = nil } end
-   
+
    -- Short circuit out of here if not in Combat state, this is done for the sake of optimisation since currently any access to
    -- lua API is prone to excessive memory allocations.
    if activeAiPackage.type ~= "Combat" then
@@ -438,7 +438,7 @@ local function onUpdate(dt)
    -- Time
    local now = core.getRealTime()
 
-   
+
 
    -- Storing combat targets in history
    gutils.addTargetsToHistory(I.AI.getTargets("Combat"))
@@ -492,17 +492,21 @@ local function onUpdate(dt)
    -- When we switch to combat - determine if we want to be hesitant (stand ground) or engage right away
    if lastAiPackage.type ~= activeAiPackage.type and activeAiPackage.type == "Combat" then
       -- Initialising combat state
-      local isGuard = gutils.imAGuard()
-      local fightBias = types.Actor.stats.ai.fight(omwself).modified
-      local dispBias = gutils.getFightDispositionBias(omwself, enemyActor)
-      local fightValue = fightBias + dispBias
-      local standGroundProb = util.clamp(util.remap(fightValue, 85, 100, 0.9, 0), 0, 0.9)
-      standGroundProb = standGroundProb * StandGroundProbModifier
-      -- gutils.print("STAND GROUND PROBABILITY", standGroundProb, " Fight val: ", fightBias, dispBias, 1)
-      if luaRandom:random() <= standGroundProb and not stoodGroundOnce and not isGuard and damageValue <= 0 then
-         core.sound.stopSay(omwself);
-         state.combatState = enums.COMBAT_STATE.STAND_GROUND
-         stoodGroundOnce = true
+      if enemyActor then
+         local isGuard = gutils.imAGuard()
+         local fightBias = types.Actor.stats.ai.fight(omwself).modified
+         local dispBias = gutils.getFightDispositionBias(omwself, enemyActor)
+         local fightValue = fightBias + dispBias
+         local standGroundProb = util.clamp(util.remap(fightValue, 85, 100, 0.9, 0), 0, 0.9)
+         standGroundProb = standGroundProb * StandGroundProbModifier
+         -- gutils.print("STAND GROUND PROBABILITY", standGroundProb, " Fight val: ", fightBias, dispBias, 1)
+         if luaRandom:random() <= standGroundProb and not stoodGroundOnce and not isGuard and damageValue <= 0 then
+            core.sound.stopSay(omwself);
+            state.combatState = enums.COMBAT_STATE.STAND_GROUND
+            stoodGroundOnce = true
+         else
+            state.combatState = enums.COMBAT_STATE.FIGHT
+         end
       else
          state.combatState = enums.COMBAT_STATE.FIGHT
       end

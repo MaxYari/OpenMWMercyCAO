@@ -542,7 +542,7 @@ local function isMyFriend(actor)
     if actor.id == omwself.id then return false end
     if types.Player.objectIsInstance(actor) then return false end
     local wActor = Actor:new(actor)
-    
+
     local sameType = true
     if types.NPC.objectIsInstance(omwself) and not types.NPC.objectIsInstance(actor) then
         sameType = false

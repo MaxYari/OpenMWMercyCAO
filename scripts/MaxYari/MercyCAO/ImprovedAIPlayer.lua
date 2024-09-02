@@ -18,6 +18,7 @@ end
 
 gutils.print("Hi! Mercy: CAO BETA is now E-N-G-A-G-E-D", 0)
 
+
 local function onUpdate(dt)
     local use = omwself.controls.use
     for _, actor in ipairs(nearby.actors) do
@@ -31,7 +32,7 @@ local function onUpdate(dt)
     -- for i, attribute in pairs(core.stats.Attribute.records) do
     --     Attribute[attribute.name] = attribute
     -- end
-    -- if omwself.controls.use > 0 then        
+    -- if omwself.controls.use > 0 then
     --     types.Actor.activeEffects(omwself):set(100,core.magic.EFFECT_TYPE.FortifyAttribute, "speed")
     -- else
     --     types.Actor.activeEffects(omwself):set(0,core.magic.EFFECT_TYPE.FortifyAttribute, "speed")
