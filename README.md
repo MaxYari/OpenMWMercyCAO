@@ -43,9 +43,9 @@ local interfaces = require('openmw.interfaces')
 local function onUpdate(dt)
    if interfaces.MercyCAO then
       if i_want_to_control_the_actor_now then
-         interfaces.MercyCAO.enabled = false
+         interfaces.MercyCAO.setEnabled(false)
       else 
-         interfaces.MercyCAO.enabled = true
+         interfaces.MercyCAO.setEnabled(true)
       end
    end
 end
@@ -57,7 +57,7 @@ return {
 }
 ```
 
-Note that some potentially usefull inforamtion is available on the interfaces.MercyCAO.state object. It can be useful if you want to integrate your mod a little bit better with Mercy. For example you might want to override NPC only when they are in an active combat state and not fleeing or standing ground/warning player not to come close, in that case - you migh check interfaces.MercyCAO.state.combatState == "FIGHT". Other useful properties of the state object are listed below under the Advanced interface section.
+Note that some potentially usefull inforamtion is available on the `interfaces.MercyCAO.state` object. It can be useful if you want to integrate your mod a little bit better with Mercy. For example you might want to override NPC only when they are in an active combat state and not fleeing or standing ground/warning player not to come close, in that case - you migh check interfaces.MercyCAO.state.combatState == "FIGHT". Other useful properties of the state object are listed below under the Advanced interface section.
 
 ### Advanced interface - extending Mercy: CAO
 

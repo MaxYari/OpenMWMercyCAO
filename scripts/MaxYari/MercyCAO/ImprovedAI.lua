@@ -397,6 +397,10 @@ local interface = {
    Events = Events
 }
 
+interface.setEnabled = function(state)
+   interface.enabled = state
+end
+
 -- Main Update Loop Below -----------------------------------------------------
 -------------------------------------------------------------------------------
 
