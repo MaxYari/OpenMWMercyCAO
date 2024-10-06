@@ -350,7 +350,7 @@ end
 function Actor:isVampire()
     -- Based on Urm's function
     local vampirism = self:activeEffects():getEffect('vampirism')
-    local isVampire = not vampirism or vampirism.magnitude > 0
+    local isVampire = vampirism and vampirism.magnitude > 0
     return isVampire
 end
 
@@ -419,6 +419,13 @@ local selfActor = Actor:new(omwself)
 
 --------------------------------------------------------------------------------
 
+
+local function actorHasEffect(actor, effectId)
+    -- Based on Urm's function
+    local eff = types.Actor.activeEffects(actor):getEffect(effectId)
+    return eff and eff.magnitude > 0
+end
+module.actorHasEffect = actorHasEffect
 
 
 local function forEachNearbyActor(distLimit, cb)

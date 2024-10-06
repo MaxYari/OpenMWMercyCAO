@@ -28,9 +28,43 @@ Compatibility patches included here provide a compatibility layer for the follow
 
 Note that compatibility patches are written using the Mercy: CAO extension interface (read below).
 
-## Extending Mercy: CAO
+## Adding Mercy compatibility to your mod
 
-Mercy provides an interface for extensions. Using this interface, it is possible to develop new NPC behaviors compatible with Mercy or compatibility patches for other mods. First of all, the Mercy script should be in a load order _before_ your extension. Secondly, you should use the extension interface before the first onUpdate call, otherwise, Mercy will finish its initialization without acknowledging your extension. It's not possible to extend Mercy in the middle of its runtime.
+Mercy provides an interface through which you can disable mercy for a specific actor as well as read/set some Mercy-specific AI information.
+
+
+### Simple interface - overriding Mercy
+
+A simple enable/disable switch is available. Want to take control of the actor and get Mercy: CAO out of the way? Use that! Don't forget to re-enable Mercy on the when you are done.
+
+```Lua
+local interfaces = require('openmw.interfaces')
+
+local function onUpdate(dt)
+   if interfaces.MercyCAO then
+      if i_want_to_control_the_actor_now then
+         interfaces.MercyCAO.enabled = false
+      else 
+         interfaces.MercyCAO.enabled = true
+      end
+   end
+end
+
+return {
+    engineHandlers = {
+        onUpdate = onUpdate,
+    }
+}
+```
+
+Note that some potentially usefull inforamtion is available on the interfaces.MercyCAO.state object. It can be useful if you want to integrate your mod a little bit better with Mercy. For example you might want to override NPC only when they are in an active combat state and not fleeing or standing ground/warning player not to come close, in that case - you migh check interfaces.MercyCAO.state.combatState == "FIGHT". Other useful properties of the state object are listed below under the Advanced interface section.
+
+### Advanced interface - extending Mercy: CAO
+
+Mercy provides an interface for extensions. The extension interface is primarily meant to be used for development of additional small behaviours that will be intertwined with the rest of the Mercy logic. For example - you might develop a sidestep/dodge mod and you'd like NPCs to also use it from time to time. Using this extension interface you can inject your dodge logic as a task that NPC will do alongside other Mercy tasks (strafing, circling, attacking e.t.c) 
+First of all, the Mercy script should be in a load order _before_ your extension. 
+Secondly, you should inject the extension (`interfaces.MercyCAO.addExtension(...)`) before the first onUpdate call, otherwise, Mercy will finish its initialization without acknowledging your extension. 
+It's not possible to inject the extension in the middle of Mercy's runtime.
 
 Extensions are done using `interfaces.MercyCAO.addExtension(treeName, combatState, stance, extensionObject)`.
 Mercy AI is globally split into two different behavior trees (`treeName` argument. And actually, it's three trees, but let's ignore the third one - it's an auxiliary and doesn't have any extension points):
@@ -75,6 +109,7 @@ interfaces.MercyCAO.addExtension("Locomotion", "STAND_GROUND", "Melee", {
 ```
 
 `state` argument is a shared behavior tree's state object (sometimes called a "blackboard" in other behavior tree libraries/implementations), it's a table of properties and functions to which all of the Mercy: CAO behavior trees have direct access.
+It is also available outside the task function via `interfaces.MercyCAO.state`.
 
 There are a number of properties you can set on a state object to affect the actor, main ones are:
 
@@ -89,6 +124,7 @@ state.sideMovement = 0
 state.lookDirection = nil -- a global vector from actor toward its look target, actor will be interpolate-rotated towards that, otherwise it will look at its enemyActor
 state.vanillaBehavior = false -- a global switch, while this is true - npc AI is controlled by the OpenMW engine and not by Mercy
 -- Value below will NOT be reset every frame - you can change it to force Mercy trees to switch into a different combat state
+-- See possible states in scripts/enums.lua
 state.combatState = "STAND_GROUND",
 -- Below is a current combat package target, you shouldn't change this - but it's useful to know who this actor is fighting against
 state.enemyActor
@@ -105,6 +141,8 @@ Note: currently spellcaster's `FIGHT` behaviors are forced to be handled by the 
 interfaces.MercyCAO.setSpellCastersAreVanilla(false)
 ```
 
+Without any additional changes this will mean that a spellcaster with a melee weapon in its hands will be stuck in Mercy melee behaviour, so again, set this to false this only if you are ready to implement the spell and stance switch logic!
+
 If your extension was successfully attached - you should see a [MercyCAO][...] Found an extension your_extension ... message printed in the console (f10 Lua console or a game process console, not in-game tilde console).
 
 If you are familiar with the concept of behavior trees here's a visual aid explaining where those extension nodes are injected (image is old, stances are not reflected):
@@ -112,6 +150,39 @@ If you are familiar with the concept of behavior trees here's a visual aid expla
 ![alt text](/imgs/extension.png)
 
 If you want to read about behavior trees - see my haphazard writeup and some links (and images!) in [this repository](https://github.com/MaxYari/behaviourtreelua2e).
+
+### Advanced interface - Adding additional voicelines
+
+In its current state only some of the race/gender combinations have new AI-generated voicelines (see `scripts/custom_voice_records.lua` for a list of all implemented races/genders). At the moment of writing the work on adding new voiceline have been stopped. If you desire to add the missing voicelines you can do so using the `MercyCAO.interfaces.addVoiceRecords(records)` where records is an object of the same format as a records object found in `scripts/custom_voice_records.lua`. `records` object you provide will be merged with the existing `records` object.
+
+Example:
+
+```Lua
+local interfaces = require('openmw.interfaces')
+
+interfaces.MercyCAO.addVoiceRecords(StandGround = {
+      {
+         race = "imperial",
+         gender = "female",
+         infos = {
+            {
+               text = "",
+               sound = "path_to_file_1.mp3"
+            },
+            {
+               text = "",
+               sound = "path_to_file_2.mp3"
+            },
+            {
+               text = "",
+               sound = "path_to_file_3.mp3"
+            }
+         }
+      },)
+```
+
+Whenever Mercy will trigger this voiceline - one of the provided files will be randomly selected and played.
+
 
 ## MWSE compatibility
 

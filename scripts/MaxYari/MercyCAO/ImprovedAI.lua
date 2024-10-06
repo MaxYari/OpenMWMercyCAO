@@ -377,7 +377,28 @@ end
 ----------------------------------------------------------------------------------------------------------------
 ----------------------------------------------------------------------------------------------------------------
 
+-- Interface ----------------------------------------------------------------
+-----------------------------------------------------------------------------
+local interface = {
+   version = 1.2,
+   enabled = true,
+   state = state,
+   addExtension = function(treeName, combatState, stance, extensionConfig)
+      local extensionPoint = combatState .. "_" .. stance
+      if not extensions[treeName] then extensions[treeName] = {} end
+      if not extensions[treeName][extensionPoint] then extensions[treeName][extensionPoint] = {} end
+      table.insert(extensions[treeName][extensionPoint], extensionConfig)
+   end,
+   setSpellCastersAreVanilla = function(state)
+      if state == true then error("You are not allowed to set spellCastersAreVanilla to true, only to false.") end
+      spellCastersAreVanilla = state
+   end,
+   addVoiceRecords = voiceManager.addVoiceRecords,
+   Events = Events
+}
 
+-- Main Update Loop Below -----------------------------------------------------
+-------------------------------------------------------------------------------
 
 local spellCastersAreVanilla = true
 local isSpellCaster = selfActor:isSpellCaster()
@@ -388,6 +409,8 @@ ScaredProbModifier = 1
 CanGoHamProb = 0.5
 BaseFriendFightVal = 80
 AvengeShoutProb = 0.5
+MercyScaredOnFleeValProb = 0.33
+MercyRetreatOnInvisProb = 0.5
 -- TO DO: Comment this out for production
 -- StandGroundProbModifier = 1e42
 -- ScaredProbModifier = 1e42
@@ -404,11 +427,17 @@ local lastGoHamCheck = 0
 local retreatedOnce = false
 local askedForMercyOnce = false
 local stoodGroundOnce = false
+
+local lastFleeValue = selfActor.stats.ai.flee().modified
+
 local firstUpdate = true
 
 -- Main update function (finally) --
 ------------------------------------
 local function onUpdate(dt)
+   -- Mercy is taking a rest if another mod disabled it
+   if interface.enabled == false then return end
+
    if firstUpdate then
       STARTEVERYTHING()
       firstUpdate = false
@@ -428,6 +457,7 @@ local function onUpdate(dt)
    end
 
    local enemyActor = AI.getActiveTarget("Combat")
+   state.enemyActor = enemyActor
 
    -- Always track HP, for damage events
    local currentHealth = types.Actor.stats.dynamic.health(omwself).current
@@ -439,12 +469,11 @@ local function onUpdate(dt)
    local now = core.getRealTime()
 
 
-
    -- Storing combat targets in history
    gutils.addTargetsToHistory(I.AI.getTargets("Combat"))
 
    -- Should we control character with Mercy?
-   -- We are not in a combat state - the engine will handle AI
+   -- If we are not in a combat state - the engine will handle AI
    local shouldOverrideAI = true
    local detStance = selfActor:getDetailedStance()
    if activeAiPackage.type ~= "Combat" or not enemyActor or types.Actor.isDead(enemyActor) or selfActor:isDead() then
@@ -512,28 +541,52 @@ local function onUpdate(dt)
       end
    end
 
-   -- Check for retreating/mercy
+   -- Check for retreating/mercy, both based on internal Mercy flee factors as well as in-game flee value
+   local mercyScared = false
+   local fleeValue = selfActor.stats.ai.flee().modified
    if (state.combatState == enums.COMBAT_STATE.FIGHT or state.combatState == enums.COMBAT_STATE.STAND_GROUND) then
-      local scared = isSelfScared(damageValue)
-      if scared then
-         local potentialStates = {}
-         if not retreatedOnce then table.insert(potentialStates, enums.COMBAT_STATE.RETREAT) end
-         if not askedForMercyOnce then table.insert(potentialStates, enums.COMBAT_STATE.MERCY) end
-         if #potentialStates > 0 then
-            local newState = potentialStates[math.random(1, #potentialStates)]
-            state.combatState = newState
-            if state.combatState == enums.COMBAT_STATE.RETREAT then retreatedOnce = true end
-            if state.combatState == enums.COMBAT_STATE.MERCY then askedForMercyOnce = true end
-         end
+      mercyScared = isSelfScared(damageValue)
+      if fleeValue ~= lastFleeValue and lastFleeValue < 100 and fleeValue >= 100 and luaRandom:random() <= MercyScaredOnFleeValProb then mercyScared = true end
+   end
+   lastFleeValue = fleeValue
+
+   if mercyScared then
+      local potentialStates = {}
+      if not retreatedOnce then table.insert(potentialStates, enums.COMBAT_STATE.RETREAT) end
+      if not askedForMercyOnce then table.insert(potentialStates, enums.COMBAT_STATE.MERCY) end
+      if #potentialStates > 0 then
+         local newState = potentialStates[math.random(1, #potentialStates)]
+         state.combatState = newState
+         if state.combatState == enums.COMBAT_STATE.RETREAT then retreatedOnce = true end
+         if state.combatState == enums.COMBAT_STATE.MERCY then askedForMercyOnce = true end
       end
    end
 
+   -- if we are not doing Mercy-style fleeing/surrender, but the flee value is >= 100 - then fallback to vanilla flee
+   if state.combatState ~= enums.COMBAT_STATE.RETREAT and state.combatState ~= enums.COMBAT_STATE.MERCY and fleeValue >= 100 then
+      shouldOverrideAI = false
+   end
+
+   -- if we can't find a nav path to enemy - fallback to vanilla behaviour
    if enemyActor then
       state.navService:setTargetPos(enemyActor.position)
       if #state.navService.path == 0 or (state.range and (state.navService.path[#state.navService.path] - enemyActor.position):length() > state.range) then
          shouldOverrideAI = false
       end
    end
+
+   -- if enemy is invisible switch to Mercy fleeing behaviour with some probability. If not switching to mercy flee - do vanilla flee.
+   if enemyActor and gutils.actorHasEffect(enemyActor, "invisibility") then
+      if luaRandom:random() <= MercyRetreatOnInvisProb and not retreatedOnce then
+         state.combatState = enums.COMBAT_STATE.RETREAT
+         retreatedOnce = true
+      end
+      -- if we are not doing mercy-style retreat - fallback to vanilla behaviour
+      if state.combatState == enums.COMBAT_STATE.FIGHT then
+         shouldOverrideAI = false
+      end
+   end
+
 
    lastAiPackage = activeAiPackage
    lastDeadState = deathState
@@ -652,47 +705,11 @@ local function onUpdate(dt)
 end
 
 
--- Events from other actors -------------------------------------------------------
------------------------------------------------------------------------------------
-
-
--- Also if you miss with ranged - theyll ignore that as well
-local function onFriendDamaged(e)
-   --gutils.print("Oh no, ", e.source.recordId, " got damaged!")
-   gutils.print("Friend " .. e.source.recordId .. " was attacked", 1)
-   if selfActor:isDead() then return end
-
-   if state.combatState == enums.COMBAT_STATE.STAND_GROUND then
-      state.combatState = enums.COMBAT_STATE.FIGHT
-   end
-   if lastAiPackage.type ~= "Combat" then
-      local raycast = nearby.castRay(gutils.getActorLookRayPos(omwself),
-         gutils.getActorLookRayPos(e.source),
-         { collisionType = nearby.COLLISION_TYPE.World + nearby.COLLISION_TYPE.Door + nearby.COLLISION_TYPE.HeightMap })
-
-      if not raycast.hitObject then
-         gutils.print("Friend " .. e.source.recordId .. " was attacked, starting a combat AI package", 1)
-         AI.startPackage({ type = 'Combat', target = e.offender })
-      else
-         gutils.print("Line of sight check hit " .. raycast.hitObject.recordId, 1)
-      end
-   end
-end
-
-local avengeSaid = false
-local function onFriendDead(e)
-   gutils.print("Oh no, friend: ", e.source.recordId, " is dead!", 1)
-   if selfActor:isDead() then return end
-   if state.combatState == enums.COMBAT_STATE.FIGHT and gutils.isMyFriend(e.source) and math.random() < AvengeShoutProb and not avengeSaid then
-      voiceManager.say(omwself, nil, "FriendDead")
-      avengeSaid = true
-   end
-end
-
 
 
 -- Animation handlers -------------------------------------------------------------
 -----------------------------------------------------------------------------------
+
 I.AnimationController.addPlayBlendedAnimationHandler(function(groupname, options)
    --print("New animation started! " .. groupname .. " : " .. options.startkey .. " --> " .. options.stopkey)
    -- Detect being staggered
@@ -704,11 +721,6 @@ end)
 -- In the text key handler: Theres no way to know for which bonegroup the text key was triggered?
 I.AnimationController.addTextKeyHandler(nil, function(groupname, key)
    --print("Animation text key! " .. groupname .. " : " .. key)
-   --print("Position of the key: " .. tostring(animation.getTextKeyTime(omwself.object, groupname .. ": " .. key)))
-   -- if state.combatState == enums.COMBAT_STATE.FIGHT then
-   --    print(groupname, key)
-   -- end
-
    if string.find(key, "chop start") or string.find(key, "thrust start") or string.find(key, "slash start") then
       state.attackState = enums.ATTACK_STATE.WINDUP_START
       state.attackGroup = groupname
@@ -743,23 +755,42 @@ I.AnimationController.addTextKeyHandler(nil, function(groupname, key)
 end)
 
 
--- Interface ----------------------------------------------------------------
------------------------------------------------------------------------------
-local interface = {
-   version = 1.1,
-   addExtension = function(treeName, combatState, stance, extensionConfig)
-      local extensionPoint = combatState .. "_" .. stance
-      if not extensions[treeName] then extensions[treeName] = {} end
-      if not extensions[treeName][extensionPoint] then extensions[treeName][extensionPoint] = {} end
-      table.insert(extensions[treeName][extensionPoint], extensionConfig)
-   end,
-   setSpellCastersAreVanilla = function(state)
-      if state == true then error("You are not allowed to set spellCastersAreVanilla to true, only to false.") end
-      spellCastersAreVanilla = state
-   end,
-   addVoiceRecords = voiceManager.addVoiceRecords,
-   Events = Events
-}
+
+-- Events from other actors -------------------------------------------------------
+-----------------------------------------------------------------------------------
+
+-- Also if you miss with ranged - theyll ignore that as well
+local function onFriendDamaged(e)
+   --gutils.print("Oh no, ", e.source.recordId, " got damaged!")
+   gutils.print("Friend " .. e.source.recordId .. " was attacked", 1)
+   if selfActor:isDead() then return end
+
+   if state.combatState == enums.COMBAT_STATE.STAND_GROUND then
+      state.combatState = enums.COMBAT_STATE.FIGHT
+   end
+   if lastAiPackage.type ~= "Combat" then
+      local raycast = nearby.castRay(gutils.getActorLookRayPos(omwself),
+         gutils.getActorLookRayPos(e.source),
+         { collisionType = nearby.COLLISION_TYPE.World + nearby.COLLISION_TYPE.Door + nearby.COLLISION_TYPE.HeightMap })
+
+      if not raycast.hitObject then
+         gutils.print("Friend " .. e.source.recordId .. " was attacked, starting a combat AI package", 1)
+         AI.startPackage({ type = 'Combat', target = e.offender })
+      else
+         gutils.print("Line of sight check hit " .. raycast.hitObject.recordId, 1)
+      end
+   end
+end
+
+local avengeSaid = false
+local function onFriendDead(e)
+   gutils.print("Oh no, friend: ", e.source.recordId, " is dead!", 1)
+   if selfActor:isDead() then return end
+   if state.combatState == enums.COMBAT_STATE.FIGHT and gutils.isMyFriend(e.source) and math.random() < AvengeShoutProb and not avengeSaid then
+      voiceManager.say(omwself, nil, "FriendDead")
+      avengeSaid = true
+   end
+end
 
 
 -- Engine handlers ------------------------------------------------------------
