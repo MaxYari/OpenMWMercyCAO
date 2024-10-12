@@ -20,13 +20,9 @@ ElevenLabs-generated voice lines by [vonwolfe](https://next.nexusmods.com/profil
 
 ## Mod compatibility
 
-Not compatible with most mods directly affecting NPC behavior in combat, unless a compatibility patch is provided by a mod author or here.
+Not compatible with most mods directly affecting NPC behavior in combat, unless a mod specifically used Mercy interface to add compatibility. 
 
-Compatibility patches included here provide a compatibility layer for the following mods:
-
-[Take Cover](https://www.nexusmods.com/morrowind/mods/54976) by [mym](https://next.nexusmods.com/profile/mym)
-
-Note that compatibility patches are written using the Mercy: CAO extension interface (read below).
+Mods by [mym](https://next.nexusmods.com/profile/mym) are compatible.
 
 ## Adding Mercy compatibility to your mod
 
