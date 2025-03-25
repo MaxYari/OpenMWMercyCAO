@@ -175,7 +175,7 @@ function MoveInDirection(config)
         self.lastPos = omwself.position
         self.coveredDistance = 0
         self.startedAt = core.getRealTime()
-
+        self.foo = self.barbar
         self.runSpeed = selfActor:getRunSpeed()
         self.walkSpeed = selfActor:getWalkSpeed()
         self.desiredSpeed = props.speed()
@@ -838,7 +838,7 @@ function PlayAnimation(config)
     config.run = function(task, state)
         if task.shouldSucceed then return task:success() end
 
-        -- Often even arrives too late and in breaks with completion clause
+        -- Often event arrives too late and in breaks with completion clause
         local completion = animation.getCompletion(omwself, groupname)
         if lastCompletion ~= nil and completion == nil then
             if lastCompletion > 0.9 then
@@ -855,8 +855,12 @@ function PlayAnimation(config)
     end
 
     config.finish = function(task, state)
-        task.anim:cancel()
-        task.anim:removeOnKeyHandler()
+        if task.anim then         
+            task.anim:cancel()
+            task.anim:removeOnKeyHandler()  
+        else
+            gutils.print("WARNING: PlayAnimation finished with no task.anim. Why?", 0)
+        end
     end
 
     return BT.Task:new(config)

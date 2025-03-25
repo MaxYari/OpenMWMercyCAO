@@ -1,8 +1,8 @@
 local core = require('openmw.core')
 local types = require('openmw.types')
 local util = require('openmw.util')
-local status, omwself = pcall(require, "openmw.self")
-local status, nearby = pcall(require, "openmw.nearby")
+local omwstatus, omwself = pcall(require, "openmw.self")
+local nrbstatus, nearby = pcall(require, "openmw.nearby")
 
 local fFightDispMult = core.getGMST("fFightDispMult")
 
@@ -24,8 +24,8 @@ local function uprint(...)
         for i, v in ipairs(args) do
             args[i] = tostring(v)
         end
-        local messageHeader = "[Mercy]"
-        if omwself then messageHeader = messageHeader .. "[" .. omwself.recordId .. "]" end
+        local messageHeader = "[Mercy]"        
+        if omwstatus then messageHeader = messageHeader .. "[" .. omwself.recordId .. "]" end
         print(messageHeader .. ":", table.concat(args, " "))
     end
 end

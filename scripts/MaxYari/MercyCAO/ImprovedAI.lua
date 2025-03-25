@@ -15,10 +15,10 @@ local selfActor = gutils.Actor:new(omwself)
 local core = require('openmw.core')
 local nearby = require("openmw.nearby")
 local AI = require('openmw.interfaces').AI
-local vfs = require('openmw.vfs')
 local util = require('openmw.util')
 local types = require('openmw.types')
 local I = require('openmw.interfaces')
+local storage = require('openmw.storage')
 
 -- 3rd party libs
 -- Setup important global functions for the behaviourtree 2e module to use--
@@ -27,7 +27,6 @@ _BehaviourTreeImports = {
    clock = core.getRealTime
 }
 local BT = require('scripts.behaviourtreelua2e.lib.behaviour_tree')
-local json = require(mp .. "libs/json")
 local luaRandom = require(mp .. "libs/randomlua")
 ----------------------------------------------------------------------------
 
@@ -250,7 +249,7 @@ local function isSelfScared(damageValue)
       --print("DAMAGE VALUE", damageValue)
       --print("Health fraction", healthFraction)
       -- Check if health is below 33%
-      if healthFraction < 0.33 then
+      if healthFraction <= SurrenderHealthFraction then
          -- Determine base probability based on level difference
          local baseProbability = levelBasedScaredProb()
 
@@ -285,16 +284,7 @@ end
 -- Initialising behaviour trees----------------------------------------------------------------------------------
 -----------------------------------------------------------------------------------------------------------------
 
--- Parsing JSON behaviourtree -----
-gutils.print("Reading Behavior3 project", 2)
--- Read the behaviour tree JSON file exported from the editor---------------
-local file = vfs.open("scripts/MaxYari/MercyCAO/OpenMW AI.b3")
-if not file then error("Failed opening behaviour tree file.") end
--- Decode it
-local projectJsonTable = json.decode(file:read("*a"))
--- And close it
-file:close()
-----------------------------------------------------------------------------
+
 
 
 -- Handling extensions made by other mods ---------
@@ -354,10 +344,10 @@ end
 -- via the interface
 local bTrees = nil
 
-local function STARTEVERYTHING()
+local function STARTEVERYTHING(BTJsonData)
    -- STARTING EVERYTHING -------------------
    -- Initialise behaviour trees ----------------------------------------------
-   bTrees = BT.LoadBehavior3Project(projectJsonTable, state, function(nodeConfig, treeData)
+   bTrees = BT.LoadBehavior3Project(BTJsonData, state, function(nodeConfig, treeData)
       -- Inject extensions (child nodes) into parent node's initialisation data if need be
       maybeInjectExtensions(nodeConfig, treeData.title)
    end)
@@ -407,9 +397,11 @@ end
 local spellCastersAreVanilla = true
 local isSpellCaster = selfActor:isSpellCaster()
 
+local settings = storage.globalSection('MercyCAOBehaviorSettings')
 -- Defining variables used by the main update functions
-StandGroundProbModifier = 1
-ScaredProbModifier = 1
+StandGroundProbModifier = settings:get("StandGroundProbModifier")
+ScaredProbModifier = settings:get("ScaredProbModifier")
+SurrenderHealthFraction = settings:get("SurrenderHealthFraction")
 CanGoHamProb = 0.5
 BaseFriendFightVal = 80
 AvengeShoutProb = 0.5
@@ -436,16 +428,27 @@ local lastFleeValue = selfActor.stats.ai.flee().modified
 
 local firstUpdate = true
 
+core.sendGlobalEvent("HiImMercyActor",{source = omwself})
+
 -- Main update function (finally) --
 ------------------------------------
 local function onUpdate(dt)
+   -- Fetch settings
+   StandGroundProbModifier = settings:get("StandGroundProbModifier")
+   ScaredProbModifier = settings:get("ScaredProbModifier")
+   SurrenderHealthFraction = settings:get("SurrenderHealthFraction")
+
    -- Mercy is taking a rest if another mod disabled it
    if interface.enabled == false then return end
 
    if firstUpdate then
-      STARTEVERYTHING()
+      -- Do something that should be done only on first update      
       firstUpdate = false
    end
+
+   --print(omwself.recordId)
+   --print(selfActor:getDetailedStance())
+   --print(selfActor:getEquipment(types.Actor.EQUIPMENT_SLOT.CarriedRight))
 
    -- Only modify AI if it's in combat!
    local activeAiPackage = AI.getActivePackage()
@@ -804,6 +807,10 @@ return {
       onUpdate = onUpdate,
    },
    eventHandlers = {
+      BTJsonData = function(jsonData)
+         print("Received behaviour tree data from Global - starting")
+         STARTEVERYTHING(jsonData)
+      end,
       FriendDamaged = function(...)
          Events:emit("FriendDamaged", ...)
          onFriendDamaged(...)

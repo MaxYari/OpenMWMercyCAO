@@ -1,3 +1,5 @@
 NPC: scripts\MaxYari\MercyCAO\ImprovedAI.lua
 GLOBAL: scripts\MaxYari\MercyCAO\ImprovedAIGlobal.lua
 PLAYER: scripts\MaxYari\MercyCAO\ImprovedAIPlayer.lua
+PLAYER: scripts\MaxYari\MercyCAO\settingsPagePlayer.lua
+GLOBAL: scripts\MaxYari\MercyCAO\settingsPageGlobal.lua
