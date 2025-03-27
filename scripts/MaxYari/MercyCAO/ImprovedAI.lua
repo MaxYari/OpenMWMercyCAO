@@ -397,7 +397,7 @@ end
 local spellCastersAreVanilla = true
 local isSpellCaster = selfActor:isSpellCaster()
 
-local settings = storage.globalSection('MercyCAOBehaviorSettings')
+local settings = storage.globalSection('SettingsMercyCAOBehavior')
 -- Defining variables used by the main update functions
 StandGroundProbModifier = settings:get("StandGroundProbModifier")
 ScaredProbModifier = settings:get("ScaredProbModifier")
