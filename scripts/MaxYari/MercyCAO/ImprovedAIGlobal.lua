@@ -22,10 +22,24 @@ local projectJsonTable = json.decode(file:read("*a"))
 file:close()
 ----------------------------------------------------------------------------
 
+
+local pendingActors = {}
+
+local function onUpdate() 
+    -- Send one actor event per frame. Hopefully distributing the workload and removing the stutter.
+    if #pendingActors > 0 then
+        local actor = table.remove(pendingActors)
+        actor:sendEvent("BTJsonData",projectJsonTable)
+    end
+end
+
 return {
+    engineHandlers = {
+        onUpdate = onUpdate,
+    },
     eventHandlers = {
         HiImMercyActor = function(data)
-            data.source:sendEvent("BTJsonData",projectJsonTable)
+            table.insert(pendingActors,data.source)
         end,
         dumpInventory = function(data)
             -- data.actor, data.position

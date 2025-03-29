@@ -426,8 +426,6 @@ local stoodGroundOnce = false
 
 local lastFleeValue = selfActor.stats.ai.flee().modified
 
-local firstUpdate = true
-
 core.sendGlobalEvent("HiImMercyActor",{source = omwself})
 
 -- Main update function (finally) --
@@ -441,10 +439,7 @@ local function onUpdate(dt)
    -- Mercy is taking a rest if another mod disabled it
    if interface.enabled == false then return end
 
-   if firstUpdate then
-      -- Do something that should be done only on first update      
-      firstUpdate = false
-   end
+   if not bTrees then return end
 
    --print(omwself.recordId)
    --print(selfActor:getDetailedStance())
