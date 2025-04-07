@@ -803,7 +803,7 @@ return {
    },
    eventHandlers = {
       BTJsonData = function(jsonData)
-         print("Received behaviour tree data from Global - starting")
+         gutils.print("Received behaviour tree data from Global - starting", 1)
          STARTEVERYTHING(jsonData)
       end,
       FriendDamaged = function(...)
