@@ -18,13 +18,25 @@ end
 
 gutils.print("Hi! Mercy: CAO BETA is now E-N-G-A-G-E-D", 0)
 
+local actorI = 1
+local actors = nil
 
 local function onUpdate(dt)
+    
     local use = omwself.controls.use
-    for _, actor in ipairs(nearby.actors) do
-        if types.NPC.objectIsInstance(actor) then
+
+    if not actors then
+        actors = nearby.actors 
+        actorI = 1
+    end
+    local actor = actors[actorI]
+    if actor then
+        if actor.type == types.NPC then
             actor:sendEvent('PlayerUse', { source = selfObject, use = use })
         end
+        actorI = actorI + 1
+    else
+        actors = nil
     end
 
     -- Some experimental stuff

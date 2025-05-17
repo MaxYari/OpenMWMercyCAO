@@ -20,6 +20,8 @@ local types = require('openmw.types')
 local I = require('openmw.interfaces')
 local storage = require('openmw.storage')
 
+
+
 -- 3rd party libs
 -- Setup important global functions for the behaviourtree 2e module to use--
 _BehaviourTreeImports = {
@@ -216,6 +218,7 @@ local function levelBasedScaredProb()
    local maxProb = 0.25
 
    -- Get levels
+   -- TO DO: This should be cached
    local characterLevel = types.Actor.stats.level(omwself).current
    local enemyLevel = types.Actor.stats.level(state.enemyActor).current
 
@@ -239,6 +242,7 @@ local function isSelfScared(damageValue)
    -- Author: Mostly ChatGPT 2024
 
    -- Get current health
+   -- TO DO: This should be cached
    local baseHealth = selfActor.stats.dynamic:health().base
    local currentHealth = selfActor.stats.dynamic:health().current
 
@@ -417,6 +421,7 @@ local notargetGracePeriod = 0.25
 local notargetDetectedAt = nil
 local lastWeaponRecord = { id = "_" }
 local lastAiPackage = { type = nil }
+-- TO DO: This should be cached
 local lastHealth = selfActor.stats.dynamic:health().current
 local lastDeadState = nil
 local lastGoHamCheck = 0
@@ -424,6 +429,11 @@ local retreatedOnce = false
 local askedForMercyOnce = false
 local stoodGroundOnce = false
 
+-- Add variables for timing
+local lastAiPackageCheck = core.getRealTime() - math.random() * 0.5
+local activeAiPackage = nil
+
+-- TO DO: This should be cached
 local lastFleeValue = selfActor.stats.ai.flee().modified
 
 core.sendGlobalEvent("HiImMercyActor",{source = omwself})
@@ -446,7 +456,14 @@ local function onUpdate(dt)
    --print(selfActor:getEquipment(types.Actor.EQUIPMENT_SLOT.CarriedRight))
 
    -- Only modify AI if it's in combat!
-   local activeAiPackage = AI.getActivePackage()
+   
+   -- Check AI package only once every 0.5 seconds
+   local now = core.getRealTime()
+   if now - lastAiPackageCheck >= 0.5 then      
+      activeAiPackage = AI.getActivePackage()
+      lastAiPackageCheck = now
+   end
+
    if not activeAiPackage then activeAiPackage = { type = nil } end
 
    -- Short circuit out of here if not in Combat state, this is done for the sake of optimisation since currently any access to
@@ -462,6 +479,7 @@ local function onUpdate(dt)
    state.enemyActor = enemyActor
 
    -- Always track HP, for damage events
+   -- TO DO: This should be cached
    local currentHealth = types.Actor.stats.dynamic.health(omwself).current
    local damageValue = lastHealth - currentHealth
    state.damageValue = damageValue
@@ -473,6 +491,8 @@ local function onUpdate(dt)
 
    -- Storing combat targets in history
    gutils.addTargetsToHistory(I.AI.getTargets("Combat"))
+
+   -- TO DO: ALL these AI calls can probably be wrapped into a singe getTargets call once in 0.5 secs
 
    -- Should we control character with Mercy?
    -- If we are not in a combat state - the engine will handle AI
@@ -525,6 +545,7 @@ local function onUpdate(dt)
       -- Initialising combat state
       if enemyActor then
          local isGuard = gutils.imAGuard()
+         -- TO DO: This should be cached
          local fightBias = types.Actor.stats.ai.fight(omwself).modified
          local dispBias = gutils.getFightDispositionBias(omwself, enemyActor)
          local fightValue = fightBias + dispBias
@@ -545,6 +566,7 @@ local function onUpdate(dt)
 
    -- Check for retreating/mercy, both based on internal Mercy flee factors as well as in-game flee value
    local mercyScared = false
+   -- TO DO: This should be cached
    local fleeValue = selfActor.stats.ai.flee().modified
    if (state.combatState == enums.COMBAT_STATE.FIGHT or state.combatState == enums.COMBAT_STATE.STAND_GROUND) then
       mercyScared = isSelfScared(damageValue)
@@ -620,11 +642,13 @@ local function onUpdate(dt)
    if weaponRecord.id ~= lastWeaponRecord.id then
       if weaponRecord.id then
          state.weaponAttacks = gutils.getSortedAttackTypes(weaponRecord)
+         -- TO DO: This should be cached
          state.weaponSkill = itemutil.getSkillStatForEquipment(omwself, weaponObj).modified
          state.reach = weaponRecord.reach * fCombatDistance * 0.95
       else
          -- We are using hand-to-hand
          state.weaponAttacks = gutils.getSortedAttackTypes(nil)
+         -- TO DO: This should be cached
          state.weaponSkill = types.NPC.stats.skills.handtohand(omwself).modified
          state.reach = fHandToHandReach * fCombatDistance * 0.95
       end
@@ -786,7 +810,7 @@ end
 
 local avengeSaid = false
 local function onFriendDead(e)
-   gutils.print("Oh no, friend: ", e.source.recordId, " is dead!", 1)
+   gutils.print("Oh no, friend: ", e.source.recordId .. " is dead!", 1)
    if selfActor:isDead() then return end
    if state.combatState == enums.COMBAT_STATE.FIGHT and gutils.isMyFriend(e.source) and math.random() < AvengeShoutProb and not avengeSaid then
       voiceManager.say(omwself, nil, "FriendDead")
