@@ -14,6 +14,11 @@ local customVoiceRecords = require(mp .. "scripts/custom_voice_records")
 local types = require("openmw.types")
 local core = require("openmw.core")
 local omwself = require("openmw.self")
+local storage = require("openmw.storage")
+
+local soundSettings = storage.globalSection('MercyCAOAudioSettings')
+local useAIVoicelines = soundSettings:get("AIVoicelines")
+local showSubtitles = soundSettings:get("ShowSubtitles")
 
 local module = {}
 
@@ -111,7 +116,9 @@ local function say(actor, targetActor, recordType, force)
 
 
     local fittingInfos = {}
-    fittingInfos = customVoiceRecords.findRelevantInfos(recordType, race, gender, isBeast, isVampire)
+    if useAIVoicelines then
+        fittingInfos = customVoiceRecords.findRelevantInfos(recordType, race, gender, isBeast, isVampire)
+    end
     if #fittingInfos == 0 then fittingInfos = findRelevantInfos(recordType, race, gender, isBeast, isVampire) end
 
     -- Pick random voice file ensuring that same line doesnt repeat twice
@@ -130,7 +137,7 @@ local function say(actor, targetActor, recordType, force)
         gutils.print(
             "WARNING: No voice records of type " ..
             recordType ..
-            " were found to fit " .. tostring(race) .. " " .. tostring(gender) .. " character.", 0)
+            " were found to fit " .. tostring(race) .. " " .. tostring(gender) .. " character.", 1)
         -- Not saying is not that bad, just ignore it
         return false
     end
@@ -143,10 +150,14 @@ local function say(actor, targetActor, recordType, force)
 
 
     -- Finally say it!
-    -- print("Voiceline to use: ", voiceInfo.sound, voiceInfo.text, tostring(voiceInfo.filterActorId),voiceInfo.id)
+    --print("Voiceline to use: ", voiceInfo.sound, voiceInfo.text, tostring(voiceInfo.filterActorId),voiceInfo.id)
     -- core.sound.say(voiceInfo.sound, actor, voiceInfo.text)
     -- say doesnt respect the subtitle setting for some reason, so rather force no subtitles here, since most of the voice lines have none anyway.
-    core.sound.say(voiceInfo.sound, actor)
+    if showSubtitles and voiceInfo.text and voiceInfo.text ~= "" then
+        core.sound.say(voiceInfo.sound, actor, voiceInfo.text)
+    else
+        core.sound.say(voiceInfo.sound, actor)
+    end
     return true
 end
 

@@ -306,7 +306,8 @@ function Actor:new(go, omwClass)
     if not omwClass then omwClass = types.Actor end
     local instance = {
         gameObject = go,
-        omwClass = omwClass
+        omwClass = omwClass,
+        skillStatDatas = {}
     }
     setmetatable(instance, self)
     return instance
@@ -411,6 +412,33 @@ function Actor:canOpenDoor(door)
         end
     end
     return canOpen
+end
+
+function Actor:healthStat()
+    if not self.healthStatData then self.healthStatData = self.stats.dynamic.health() end
+    return self.healthStatData
+end
+
+function Actor:aiFightStat()
+    if not self.aiFightStatData then self.aiFightStatData = self.stats.ai.fight() end
+    return self.aiFightStatData
+end
+
+function Actor:aiFleeStat()
+    if not self.aiFleeStatData then self.aiFleeStatData = self.stats.ai.flee() end
+    return self.aiFleeStatData
+end
+
+function Actor:levelStat()
+    if not self.levelStatData then self.levelStatData = self.stats.level() end
+    return self.levelStatData
+end
+
+function Actor:getSkillStat(skillId)
+    if not self.skillStatDatas[skillId] then
+        self.skillStatDatas[skillId] = types.NPC.stats.skills[skillId](self.gameObject)
+    end
+    return self.skillStatDatas[skillId]
 end
 
 module.Actor = Actor

@@ -176,7 +176,7 @@ end
 
 
 local function getSkillStatForSkill(actor, skill)
-	return types.NPC.stats.skills[skill.id](actor)
+	return actor:getSkillStat(skill.id)
 end
 
 

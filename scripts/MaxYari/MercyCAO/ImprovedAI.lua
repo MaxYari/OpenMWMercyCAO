@@ -20,8 +20,6 @@ local types = require('openmw.types')
 local I = require('openmw.interfaces')
 local storage = require('openmw.storage')
 
-
-
 -- 3rd party libs
 -- Setup important global functions for the behaviourtree 2e module to use--
 _BehaviourTreeImports = {
@@ -217,10 +215,9 @@ local function levelBasedScaredProb()
    local minProb = 0.05
    local maxProb = 0.25
 
-   -- Get levels
-   -- TO DO: This should be cached
-   local characterLevel = types.Actor.stats.level(omwself).current
-   local enemyLevel = types.Actor.stats.level(state.enemyActor).current
+   -- Get levels   
+   local characterLevel = selfActor:levelStat().current
+   local enemyLevel = state.enemyActorAux:levelStat().current
 
    -- Calculate level difference
    local levelDifference = characterLevel - enemyLevel
@@ -241,10 +238,9 @@ end
 local function isSelfScared(damageValue)
    -- Author: Mostly ChatGPT 2024
 
-   -- Get current health
-   -- TO DO: This should be cached
-   local baseHealth = selfActor.stats.dynamic:health().base
-   local currentHealth = selfActor.stats.dynamic:health().current
+   -- Get current health   
+   local baseHealth = selfActor:healthStat().base
+   local currentHealth = selfActor:healthStat().current
 
 
    -- Proceed only if there was actual damage
@@ -421,8 +417,7 @@ local notargetGracePeriod = 0.25
 local notargetDetectedAt = nil
 local lastWeaponRecord = { id = "_" }
 local lastAiPackage = { type = nil }
--- TO DO: This should be cached
-local lastHealth = selfActor.stats.dynamic:health().current
+local lastHealth = selfActor:healthStat().current
 local lastDeadState = nil
 local lastGoHamCheck = 0
 local retreatedOnce = false
@@ -432,20 +427,22 @@ local stoodGroundOnce = false
 -- Add variables for timing
 local lastAiPackageCheck = core.getRealTime() - math.random() * 0.5
 local activeAiPackage = nil
+local combatTargets = {}
+local aiEnabled = true
+local enableAI = function (state)
+   if not aiEnabled == state then
+      aiEnabled = state
+      omwself:enableAI(state)
+   end
+end
 
--- TO DO: This should be cached
-local lastFleeValue = selfActor.stats.ai.flee().modified
+local lastFleeValue = selfActor:aiFleeStat().modified
 
 core.sendGlobalEvent("HiImMercyActor",{source = omwself})
 
 -- Main update function (finally) --
 ------------------------------------
 local function onUpdate(dt)
-   -- Fetch settings
-   StandGroundProbModifier = settings:get("StandGroundProbModifier")
-   ScaredProbModifier = settings:get("ScaredProbModifier")
-   SurrenderHealthFraction = settings:get("SurrenderHealthFraction")
-
    -- Mercy is taking a rest if another mod disabled it
    if interface.enabled == false then return end
 
@@ -459,10 +456,17 @@ local function onUpdate(dt)
    
    -- Check AI package only once every 0.5 seconds
    local now = core.getRealTime()
-   if now - lastAiPackageCheck >= 0.5 then      
-      activeAiPackage = AI.getActivePackage()
+   if now - lastAiPackageCheck >= 0.5 then  
+      combatTargets = AI.getTargets("Combat")   
+      if not combatTargets then combatTargets = {} end
+      if #combatTargets > 0 then
+         activeAiPackage = {type = "Combat"}
+      end
+      --activeAiPackage = AI.getActivePackage()
       lastAiPackageCheck = now
    end
+
+      
 
    if not activeAiPackage then activeAiPackage = { type = nil } end
 
@@ -471,16 +475,14 @@ local function onUpdate(dt)
    if activeAiPackage.type ~= "Combat" then
       state.combatState = enums.COMBAT_STATE.NO_STATE
       lastAiPackage = activeAiPackage
-      omwself:enableAI(true)
+      enableAI(true)
       return
    end
+   
+   local enemyActor = combatTargets[1]
 
-   local enemyActor = AI.getActiveTarget("Combat")
-   state.enemyActor = enemyActor
-
-   -- Always track HP, for damage events
-   -- TO DO: This should be cached
-   local currentHealth = types.Actor.stats.dynamic.health(omwself).current
+   -- Always track HP, for damage events   
+   local currentHealth = selfActor:healthStat().current
    local damageValue = lastHealth - currentHealth
    state.damageValue = damageValue
    lastHealth = currentHealth
@@ -490,9 +492,9 @@ local function onUpdate(dt)
 
 
    -- Storing combat targets in history
-   gutils.addTargetsToHistory(I.AI.getTargets("Combat"))
+   gutils.addTargetsToHistory(combatTargets)
 
-   -- TO DO: ALL these AI calls can probably be wrapped into a singe getTargets call once in 0.5 secs
+   
 
    -- Should we control character with Mercy?
    -- If we are not in a combat state - the engine will handle AI
@@ -506,14 +508,23 @@ local function onUpdate(dt)
       shouldOverrideAI = false
    end
    -- A small grace period when an empty target is detected in a cobat package. Allows engine to clean up.
-   AI.forEachPackage(function(package)
+   if not notargetDetectedAt then
+      for _, target in ipairs(combatTargets) do
+         if not target or not target:isValid() then
+            notargetDetectedAt = now
+         end
+      end
+   end
+   
+   --[[ AI.forEachPackage(function(package)
       if package.type == "Combat" and not package.target and not notargetDetectedAt then
          notargetDetectedAt = now
       end
-   end)
+   end) ]]
    if notargetDetectedAt and now - notargetDetectedAt <= notargetGracePeriod then
-      notargetDetectedAt = nil
       shouldOverrideAI = false
+   else
+      notargetDetectedAt = nil
    end
 
 
@@ -544,9 +555,8 @@ local function onUpdate(dt)
    if lastAiPackage.type ~= activeAiPackage.type and activeAiPackage.type == "Combat" then
       -- Initialising combat state
       if enemyActor then
-         local isGuard = gutils.imAGuard()
-         -- TO DO: This should be cached
-         local fightBias = types.Actor.stats.ai.fight(omwself).modified
+         local isGuard = gutils.imAGuard()         
+         local fightBias = selfActor:aiFightStat().modified
          local dispBias = gutils.getFightDispositionBias(omwself, enemyActor)
          local fightValue = fightBias + dispBias
          local standGroundProb = util.clamp(util.remap(fightValue, 85, 100, 0.9, 0), 0, 0.9)
@@ -565,9 +575,8 @@ local function onUpdate(dt)
    end
 
    -- Check for retreating/mercy, both based on internal Mercy flee factors as well as in-game flee value
-   local mercyScared = false
-   -- TO DO: This should be cached
-   local fleeValue = selfActor.stats.ai.flee().modified
+   local mercyScared = false   
+   local fleeValue = selfActor:aiFleeStat().modified
    if (state.combatState == enums.COMBAT_STATE.FIGHT or state.combatState == enums.COMBAT_STATE.STAND_GROUND) then
       mercyScared = isSelfScared(damageValue)
       if fleeValue ~= lastFleeValue and lastFleeValue < 100 and fleeValue >= 100 and luaRandom:random() <= MercyScaredOnFleeValProb then mercyScared = true end
@@ -616,7 +625,7 @@ local function onUpdate(dt)
    lastDeadState = deathState
 
    -- Disabling AI so everything can be controlled by ~Mercy~
-   omwself:enableAI(not shouldOverrideAI)
+   enableAI(not shouldOverrideAI)
    if not shouldOverrideAI then return end
 
 
@@ -625,7 +634,13 @@ local function onUpdate(dt)
    state:clear()
 
    state.dt = dt
+
+   if state.enemyActor ~= enemyActor then
+      if enemyActor then state.enemyActorAux = gutils.Actor:new(enemyActor) else
+      state.enemyActorAux = nil end
+   end
    state.enemyActor = enemyActor
+
    if state.enemyActor then
       state.range = gutils.getDistanceToBounds(omwself, state.enemyActor)
    else
@@ -641,15 +656,13 @@ local function onUpdate(dt)
 
    if weaponRecord.id ~= lastWeaponRecord.id then
       if weaponRecord.id then
-         state.weaponAttacks = gutils.getSortedAttackTypes(weaponRecord)
-         -- TO DO: This should be cached
-         state.weaponSkill = itemutil.getSkillStatForEquipment(omwself, weaponObj).modified
+         state.weaponAttacks = gutils.getSortedAttackTypes(weaponRecord)         
+         state.weaponSkill = itemutil.getSkillStatForEquipment(selfActor, weaponObj).modified
          state.reach = weaponRecord.reach * fCombatDistance * 0.95
       else
          -- We are using hand-to-hand
-         state.weaponAttacks = gutils.getSortedAttackTypes(nil)
-         -- TO DO: This should be cached
-         state.weaponSkill = types.NPC.stats.skills.handtohand(omwself).modified
+         state.weaponAttacks = gutils.getSortedAttackTypes(nil)         
+         state.weaponSkill = selfActor:getSkillStat("handtohand").modified
          state.reach = fHandToHandReach * fCombatDistance * 0.95
       end
       lastWeaponRecord = weaponRecord
@@ -701,7 +714,7 @@ local function onUpdate(dt)
 
    -- Apply state properties modified by behavior trees to actor controls ----
    if state.vanillaBehavior then
-      omwself:enableAI(true)
+      enableAI(true)
       return
    else
       if state.stance ~= selfActor:getStance() then
