@@ -537,7 +537,7 @@ function RetreatBreaker(config)
             warmupComplete = true
         end
 
-        local baseHealth = selfActor.stats.dynamic:health().base
+        local baseHealth = selfActor:healthStat().base
 
         -- Check if enough damage was taken
         if warmupComplete and state.damageValue > 0 then
@@ -896,7 +896,7 @@ BT.register("HasDumpableItems", HasDumpableItems)
 function Pacify(config)
     config.start = function(task)
         AI.removePackages("Combat") -- As of right now this makes actors stuck in an Unknown package
-        selfActor.stats.ai:fight().base = 30
+        selfActor:aiFightStat().base = 30
 
         task:success()
     end
