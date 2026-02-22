@@ -20,6 +20,12 @@ local types = require('openmw.types')
 local I = require('openmw.interfaces')
 local storage = require('openmw.storage')
 
+-- OpenMW API Version check
+if core.API_REVISION < 64 then
+   error(
+      "Can not start Mercy: CAO, newer version of lua API is required. Please update OpenMW.")
+end
+
 -- 3rd party libs
 -- Setup important global functions for the behaviourtree 2e module to use--
 _BehaviourTreeImports = {
@@ -28,24 +34,25 @@ _BehaviourTreeImports = {
 }
 local BT = require('scripts.behaviourtreelua2e.lib.behaviour_tree')
 local luaRandom = require(mp .. "libs/randomlua")
-local bTrees = nil
 ----------------------------------------------------------------------------
 
-local blacklist = nil
+
 
 --- To be or not to be!? ---
-DebugLevel = 0
+DebugLevel = 1
 ----------------------------
-
-Events = EventsManager:new()
 
 --- Init custom behaviour nodes
 require(mp .. "scripts/behavior_nodes")
+
+-- Event bus
+Events = EventsManager:new()
 
 -- GSMTs
 local fCombatDistance = core.getGMST("fCombatDistance")
 local fHandToHandReach = core.getGMST("fHandToHandReach")
 
+-- Navigation service
 local NavigationService = require(mp .. "scripts/navservice")
 local navService = NavigationService({
    cacheDuration = 1,
@@ -53,10 +60,13 @@ local navService = NavigationService({
    pathingDeadzone = 35
 })
 
-if core.API_REVISION < 64 then
-   error(
-      "Can not start Mercy: CAO, newer version of lua API is required. Please update OpenMW.")
-end
+-- Actor type variables
+local spellCastersAreVanilla = true
+local isSpellCaster = selfActor:isSpellCaster()
+local isGuard = selfActor:isAGuard() 
+-- Data containers
+local bTrees = nil
+local blacklist = nil
 
 
 -- And the story begins!
@@ -377,10 +387,6 @@ end
 
 -- Main Logic -----------------------------------------------------
 -------------------------------------------------------------------------------
-
-local spellCastersAreVanilla = true
-local isSpellCaster = selfActor:isSpellCaster()
-
 local settings = storage.globalSection('SettingsMercyCAOBehavior')
 -- Defining variables used by the main update functions
 CompanionMercyProb = settings:get("CompanionMercyProb")
@@ -465,8 +471,8 @@ local function STARTEVERYTHING(BTJsonData)
    luaRandom:randomseed(gutils.stringToHash(omwself.recordId))
    randomiseInclinations()
 
-   if isBlacklisted(blacklist.surrender_disable) then
-      gutils.print(omwself.recordId," Is BLACKLISTED from surrendering.", 1)
+   if isBlacklisted(blacklist.surrender_disable) or isGuard then
+      gutils.print(omwself.recordId," Is BLACKLISTED from surrendering (blacklist match or is a guard).", 1)
       ScaredProbModifier = 0
    end
 end
@@ -590,8 +596,7 @@ local function onUpdate(dt)
    -- When we switch to combat - determine if we want to be hesitant (stand ground) or engage right away
    if lastAiPackage.type ~= activeAiPackage.type and activeAiPackage.type == "Combat" then
       -- Initialising combat state
-      if enemyActor then
-         local isGuard = gutils.imAGuard()         
+      if enemyActor then                 
          local fightBias = selfActor:aiFightStat().modified
          local dispBias = gutils.getFightDispositionBias(omwself, enemyActor)
          local fightValue = fightBias + dispBias

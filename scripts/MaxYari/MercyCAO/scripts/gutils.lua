@@ -382,8 +382,8 @@ end
 
 function Actor:isAGuard()
     if not types.NPC.objectIsInstance(self.gameObject) then return false end
-    local className = types.NPC.record(self.gameObject.recordId).class
-    return className == "guard"
+    if not self.className then self.className = types.NPC.record(self.gameObject.recordId).class end    
+    return self.className == "guard"
 end
 
 function Actor:getDetailedStance()

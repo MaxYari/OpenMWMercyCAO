@@ -36,8 +36,7 @@ full_disable:
 
 surrender_disable:
   recordIds:
-    - sterdecan
-    - hlaalu guard_outside    
+    - sterdecan        
   cellIds:
     - exampleCellId
     
