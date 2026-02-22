@@ -43,6 +43,17 @@ I.Settings.registerGroup {
             name = 'Scared Health Fraction',
             description = 'A fraction of total health (in 0 - 1 range) below which NPC will consider asking for mercy or running away.',
         },
+        {
+            key = 'CompanionMercyProb',
+            renderer = 'number',
+            default = 0.9,
+            argument = {
+                min = 0,
+                max = 1,
+            },
+            name = 'Companion Mercy Probability',
+            description = 'A probability (in 0 - 1 range) that a companion will show mercy to surrendering foes.',
+        }
     },
 }
 

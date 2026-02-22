@@ -894,9 +894,10 @@ end
 BT.register("HasDumpableItems", HasDumpableItems)
 
 function Pacify(config)
-    config.start = function(task)
+    config.start = function(task, state)
         AI.removePackages("Combat") -- As of right now this makes actors stuck in an Unknown package
-        selfActor:aiFightStat().base = 30
+        selfActor:aiFightStat().base = 30    
+        state.resetActiveAiPackage = true            
 
         task:success()
     end

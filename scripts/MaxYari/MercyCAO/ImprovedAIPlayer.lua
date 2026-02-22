@@ -51,8 +51,16 @@ local function onUpdate(dt)
     -- end
 end
 
+local function onCombatTargetsChanged(e)
+    if e.actor == omwself.object then return end
+    e.actor:sendEvent('OMWMusicHackCombatTargetsChanged', { targets = e.targets })
+end
+
 return {
     engineHandlers = {
         onUpdate = onUpdate,
+    },
+    eventHandlers = { 
+        OMWMusicCombatTargetsChanged = onCombatTargetsChanged,
     }
 }

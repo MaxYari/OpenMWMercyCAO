@@ -1,0 +1,43 @@
+#### This yaml file is used to turn off Mercy or its separate features for specific npcs or for whole cells (areas in the game)
+# Example
+#
+# surrender_disable:
+#  recordIds:
+#    - exampleIdA
+#    - exampleIdB
+#  cellIds:
+#    - exampleCellIdA
+#    - exampleCellIdB
+#
+# you dont need to change anything but only add/remove elements in the provided lists, such as for example you want to exclude
+# a character with a record id "ExampleNPC" from ever surrendering - to do so you will add their record id into a "recordIds" list of 
+# a "surrender_disable" section, e.g if the example above will look like this after the change:
+#
+# surrender_disable:
+#  recordIds:
+#    - exampleIdA
+#    - exampleIdB
+#    - ExampleNPC
+#  cellIds:
+#    - exampleCellIdA
+#    - exampleCellIdB
+#
+# You can easily find information on .yaml syntax online
+# Feel free to share you .yaml file with other people, that's why it was created in the first place!
+
+# This is a live part of the file - make all your modifications below
+full_disable:
+  recordIds:    
+    - ab01alsonar
+    - bird
+  cellIds:
+    - exampleCellIdA
+    - exampleCellIdB
+
+surrender_disable:
+  recordIds:
+    - sterdecan
+    - hlaalu guard_outside    
+  cellIds:
+    - exampleCellId
+    

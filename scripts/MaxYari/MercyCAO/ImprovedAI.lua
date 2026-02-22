@@ -28,7 +28,10 @@ _BehaviourTreeImports = {
 }
 local BT = require('scripts.behaviourtreelua2e.lib.behaviour_tree')
 local luaRandom = require(mp .. "libs/randomlua")
+local bTrees = nil
 ----------------------------------------------------------------------------
+
+local blacklist = nil
 
 --- To be or not to be!? ---
 DebugLevel = 0
@@ -50,20 +53,15 @@ local navService = NavigationService({
    pathingDeadzone = 35
 })
 
-
 if core.API_REVISION < 64 then
    error(
       "Can not start Mercy: CAO, newer version of lua API is required. Please update OpenMW.")
 end
 
--- Checking for some common placeholder npcs and not using mercy on them
-if omwself.recordId == "ab01alsonar" then return end
 
 -- And the story begins!
 -- if omwself.recordId ~= "tanisie verethi" then return end
 -- gutils.print(omwself.recordId .. ": Mercy: CAO BETA Improved AI is ON", 0)
-
-
 
 
 -- State object is an object to which behavior tree has access
@@ -159,6 +157,10 @@ local state = {
 
 -- Helper functions ---------------------------------------------------------------
 -----------------------------------------------------------------------------------
+local function isBlacklisted(blist)
+   return (blist.recordIdsMap[omwself.recordId] or blist.cellIdsMap[omwself.cell.id])
+end
+
 local function randomiseInclinations()
    local standartInclinations = { "rootedAttackInc", "nearStopInc", "nearStrafeInc", "nearBackInc", "midStrafeInc",
       "midChaseInc", "midAttackInc", "midStopInc" }
@@ -217,6 +219,8 @@ local function levelBasedScaredProb()
 
    -- Get levels   
    local characterLevel = selfActor:levelStat().current
+
+   if not state.enemyActorAux then return 0 end
    local enemyLevel = state.enemyActorAux:levelStat().current
 
    -- Calculate level difference
@@ -338,39 +342,13 @@ local function checkExtensionsWarning()
       end
    end
 end
-
-
--- A function that will initialise all behavior trees on a first update. Done on a first update so other mods have a chance to provide extensions
--- via the interface
-local bTrees = nil
-
-local function STARTEVERYTHING(BTJsonData)
-   -- STARTING EVERYTHING -------------------
-   -- Initialise behaviour trees ----------------------------------------------
-   bTrees = BT.LoadBehavior3Project(BTJsonData, state, function(nodeConfig, treeData)
-      -- Inject extensions (child nodes) into parent node's initialisation data if need be
-      maybeInjectExtensions(nodeConfig, treeData.title)
-   end)
-
-   checkExtensionsWarning()
-
-   bTrees.Combat:setDebugLevel(0)
-   bTrees.CombatAux:setDebugLevel(0)
-   bTrees.Locomotion:setDebugLevel(0)
-   -- Ready to use! -----------------------------------------------------------
-
-   -- Rndomising key npc factors
-   luaRandom:randomseed(gutils.stringToHash(omwself.recordId))
-   randomiseInclinations()
-end
-
 ----------------------------------------------------------------------------------------------------------------
 ----------------------------------------------------------------------------------------------------------------
 
 -- Interface ----------------------------------------------------------------
 -----------------------------------------------------------------------------
 local interface = {
-   version = 1.2,
+   version = 1.33,
    enabled = true,
    state = state,
    addExtension = function(treeName, combatState, stance, extensionConfig)
@@ -391,7 +369,13 @@ interface.setEnabled = function(state)
    interface.enabled = state
 end
 
--- Main Update Loop Below -----------------------------------------------------
+
+
+
+
+
+
+-- Main Logic -----------------------------------------------------
 -------------------------------------------------------------------------------
 
 local spellCastersAreVanilla = true
@@ -399,6 +383,7 @@ local isSpellCaster = selfActor:isSpellCaster()
 
 local settings = storage.globalSection('SettingsMercyCAOBehavior')
 -- Defining variables used by the main update functions
+CompanionMercyProb = settings:get("CompanionMercyProb")
 StandGroundProbModifier = settings:get("StandGroundProbModifier")
 ScaredProbModifier = settings:get("ScaredProbModifier")
 SurrenderHealthFraction = settings:get("SurrenderHealthFraction")
@@ -419,6 +404,7 @@ local lastWeaponRecord = { id = "_" }
 local lastAiPackage = { type = nil }
 local lastHealth = selfActor:healthStat().current
 local lastDeadState = nil
+local lastCombatState = nil
 local lastGoHamCheck = 0
 local retreatedOnce = false
 local askedForMercyOnce = false
@@ -426,8 +412,11 @@ local stoodGroundOnce = false
 
 -- Add variables for timing
 local lastAiPackageCheck = core.getRealTime() - math.random() * 0.5
-local activeAiPackage = nil
+local activeAiPackage = { type = nil } -- Due to employed optimisation hack the type will always be either "Combat" or nil, it will never reflect Follow, Wander etc. package states
 local combatTargets = {}
+local escortTargets = {}
+local followTargets = {}
+local imACompanion = false
 local aiEnabled = true
 local enableAI = function (state)
    if not aiEnabled == state then
@@ -438,11 +427,59 @@ end
 
 local lastFleeValue = selfActor:aiFleeStat().modified
 
+
+
+
+----------------------------------------------------------------
+-- Ask Global script to provide all the necessary json and config data, its response will trigger a STARTEVERYTHING method below
 core.sendGlobalEvent("HiImMercyActor",{source = omwself})
+----------------------------------------------------------------
+----------------------------------------------------------------
+
+
+-- A function that will initialise all behavior trees on a first update. Done on a first update so other mods have a chance to provide extensions
+-- via the interface
+local function STARTEVERYTHING(BTJsonData)
+   if isBlacklisted(blacklist.full_disable) then
+      gutils.print(omwself.recordId," is BLACKLISTED from starting Mercy:CAO, Mercy will not start", 1)
+      return
+   end
+
+   gutils.print(omwself.recordId," Passed a blacklist check - starting", 1)
+   
+   -- STARTING EVERYTHING -------------------
+   -- Initialise behaviour trees ----------------------------------------------
+   bTrees = BT.LoadBehavior3Project(BTJsonData, state, function(nodeConfig, treeData)
+      -- Inject extensions (child nodes) into parent node's initialisation data if need be
+      maybeInjectExtensions(nodeConfig, treeData.title)
+   end)
+
+   checkExtensionsWarning()
+
+   bTrees.Combat:setDebugLevel(0)
+   bTrees.CombatAux:setDebugLevel(0)
+   bTrees.Locomotion:setDebugLevel(0)
+   -- Ready to use! -----------------------------------------------------------
+
+   -- Rndomising key npc factors
+   luaRandom:randomseed(gutils.stringToHash(omwself.recordId))
+   randomiseInclinations()
+
+   if isBlacklisted(blacklist.surrender_disable) then
+      gutils.print(omwself.recordId," Is BLACKLISTED from surrendering.", 1)
+      ScaredProbModifier = 0
+   end
+end
+
+
+
+
 
 -- Main update function (finally) --
 ------------------------------------
 local function onUpdate(dt)
+   if dt <= 0 then return end
+
    -- Mercy is taking a rest if another mod disabled it
    if interface.enabled == false then return end
 
@@ -454,8 +491,9 @@ local function onUpdate(dt)
 
    -- Only modify AI if it's in combat!
    
+   -- This is now replaced by a hack of retransmitting target update events from music event emitted to player
    -- Check AI package only once every 0.5 seconds
-   local now = core.getRealTime()
+   --[[ local now = core.getRealTime()
    if now - lastAiPackageCheck >= 0.5 then  
       combatTargets = AI.getTargets("Combat")   
       if not combatTargets then combatTargets = {} end
@@ -464,11 +502,9 @@ local function onUpdate(dt)
       end
       --activeAiPackage = AI.getActivePackage()
       lastAiPackageCheck = now
-   end
+   end ]]
 
-      
-
-   if not activeAiPackage then activeAiPackage = { type = nil } end
+   
 
    -- Short circuit out of here if not in Combat state, this is done for the sake of optimisation since currently any access to
    -- lua API is prone to excessive memory allocations.
@@ -583,10 +619,17 @@ local function onUpdate(dt)
    end
    lastFleeValue = fleeValue
 
+   local fightingACreature
+   for _, target in ipairs(combatTargets) do
+      if types.Creature.objectIsInstance(target) then
+         fightingACreature = true
+         break
+      end
+   end
    if mercyScared then
       local potentialStates = {}
       if not retreatedOnce then table.insert(potentialStates, enums.COMBAT_STATE.RETREAT) end
-      if not askedForMercyOnce then table.insert(potentialStates, enums.COMBAT_STATE.MERCY) end
+      if not askedForMercyOnce and not fightingACreature then table.insert(potentialStates, enums.COMBAT_STATE.MERCY) end
       if #potentialStates > 0 then
          local newState = potentialStates[math.random(1, #potentialStates)]
          state.combatState = newState
@@ -741,6 +784,21 @@ local function onUpdate(dt)
             -moveutils.lookRotation(omwself, omwself.position + lookDirection), dt * 3)
       end
    end
+
+   -- Just a silly hack to ensure that ai package is update on time after Pacify node
+   if state.resetActiveAiPackage then
+      state.resetActiveAiPackage = nil
+      activeAiPackage = { type = nil }
+      combatTargets = {}
+   end
+
+   -- Notify everyone on a combat state change
+   if state.combatState ~= lastCombatState then
+      for _, target in ipairs(combatTargets) do
+         target:sendEvent("Mercy_CombatStateChanged", { sender = omwself, combatState = state.combatState})
+      end
+      lastCombatState = state.combatState
+   end   
 end
 
 
@@ -800,6 +858,8 @@ end)
 
 -- Also if you miss with ranged - theyll ignore that as well
 local function onFriendDamaged(e)
+   if not bTrees then return end
+
    --gutils.print("Oh no, ", e.source.recordId, " got damaged!")
    gutils.print("Friend " .. e.source.recordId .. " was attacked", 1)
    if selfActor:isDead() then return end
@@ -823,11 +883,54 @@ end
 
 local avengeSaid = false
 local function onFriendDead(e)
+   if not bTrees then return end
+
    gutils.print("Oh no, friend: ", e.source.recordId .. " is dead!", 1)
    if selfActor:isDead() then return end
    if state.combatState == enums.COMBAT_STATE.FIGHT and gutils.isMyFriend(e.source) and math.random() < AvengeShoutProb and not avengeSaid then
       voiceManager.say(omwself, nil, "FriendDead")
       avengeSaid = true
+   end
+end
+
+local enemyCombatStates = {}
+local function onEnemyCombatStateChanged(e)
+   if not bTrees then return end
+
+   print("Received a combat state update from ",e.sender,e.combatState)
+   enemyCombatStates[sender.id] = e.combatState
+   if e.combatState == enums.COMBAT_STATE.MERCY and imACompanion and next(combatTargets) then
+      -- This NPC surrenders, companions shall show mercy
+      if math.random() <= CompanionMercyProb then
+         gutils.print("Enemy ", e.sender.recordId, " is asking for mercy.", omwself.recordId .. " is a merciful companion.", 1)
+         AI.filterPackages(function(package)
+            return package.target ~= e.sender
+         end)
+      end
+   end
+end
+
+local function isPlayerInTargets(targets)
+   if not targets then return end
+   for _, t in ipairs(targets) do
+      if types.Player.objectIsInstance(t) then return true end
+   end
+   return false
+end
+
+local function onTargetsChanged(e)
+   combatTargets = e.targets
+   if not combatTargets then combatTargets = {} end
+
+   if next(combatTargets) then
+      -- Update ai package
+      activeAiPackage = {type = "Combat"}
+      -- Update follow and escort targets, updated only here for performance reasons
+      followTargets = AI.getTargets("Follow")
+      escortTargets = AI.getTargets("Escort")
+      imACompanion = isPlayerInTargets(followTargets) or isPlayerInTargets(escortTargets)      
+   else
+      activeAiPackage = {type = nil}
    end
 end
 
@@ -839,9 +942,11 @@ return {
       onUpdate = onUpdate,
    },
    eventHandlers = {
-      BTJsonData = function(jsonData)
-         gutils.print("Received behaviour tree data from Global - starting", 1)
-         STARTEVERYTHING(jsonData)
+      OMWMusicHackCombatTargetsChanged = onTargetsChanged,
+      Mercy_StartupData = function(e)
+         gutils.print(omwself.recordId," Received startup data from Global", 1)
+         blacklist = e.blacklist
+         STARTEVERYTHING(e.b3projectJson)
       end,
       FriendDamaged = function(...)
          Events:emit("FriendDamaged", ...)
@@ -853,7 +958,8 @@ return {
       end,
       PlayerUse = function(...)
          Events:emit("PlayerUse", ...)
-      end
+      end,
+      Mercy_CombatStateChanged = onEnemyCombatStateChanged,
    },
    interfaceName = "MercyCAO",
    interface = interface

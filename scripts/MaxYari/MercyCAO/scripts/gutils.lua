@@ -307,7 +307,9 @@ function Actor:new(go, omwClass)
     local instance = {
         gameObject = go,
         omwClass = omwClass,
-        skillStatDatas = {}
+        skillStatDatas = {},
+        attributeStatDatas = {},
+        dynamicStatDatas = {}
     }
     setmetatable(instance, self)
     return instance
@@ -439,6 +441,20 @@ function Actor:getSkillStat(skillId)
         self.skillStatDatas[skillId] = types.NPC.stats.skills[skillId](self.gameObject)
     end
     return self.skillStatDatas[skillId]
+end
+
+function Actor:getDynamicStat(statId)
+    if not self.dynamicStatDatas[statId] then
+        self.dynamicStatDatas[statId] = self.stats.dynamic[statId]()
+    end
+    return self.dynamicStatDatas[statId]
+end
+
+function Actor:getAttributeStat(attrId)
+    if not self.attributeStatDatas[attrId] then
+        self.attributeStatDatas[attrId] = self.stats.attributes[attrId]()
+    end
+    return self.attributeStatDatas[attrId]
 end
 
 module.Actor = Actor
