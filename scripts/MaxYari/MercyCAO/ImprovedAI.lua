@@ -39,7 +39,7 @@ local luaRandom = require(mp .. "libs/randomlua")
 
 
 --- To be or not to be!? ---
-DebugLevel = 1
+DebugLevel = 0
 ----------------------------
 
 --- Init custom behaviour nodes

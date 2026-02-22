@@ -28,6 +28,10 @@ Mods by [mym](https://next.nexusmods.com/profile/mym) are compatible.
 
 Mercy provides an interface through which you can disable mercy for a specific actor as well as read/set some Mercy-specific AI information.
 
+### Moddable config system - blacklisting NPCs/Cells from using Mercy or from surrendering
+
+Check configs/basic_blaclist.yaml for a general config syntax. Supply a similar config with your mod, the config should be located in `scripts/MaxYari/MercyCAO/configs/` but the name of the file does not matter as long as its a .yaml file. It is recommended though to give it a unique name that will not conflict with configs provided by other mods.
+
 
 ### Simple interface - overriding Mercy
 
