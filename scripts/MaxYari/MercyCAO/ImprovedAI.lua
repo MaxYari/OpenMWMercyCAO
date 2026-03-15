@@ -772,6 +772,9 @@ local function onUpdate(dt)
       omwself.controls.movement = state.movement
       omwself.controls.sideMovement = state.sideMovement
       omwself.controls.use = state.attack
+      print("Use:",omwself.controls.use,state.attack)
+      print("ATTACK_TYPE:")
+      view(omwself.ATTACK_TYPE)
       omwself.controls.jump = state.jump
 
       -- If no lookDirection provided - default behaviour is to stare at the enemy
@@ -902,8 +905,8 @@ local enemyCombatStates = {}
 local function onEnemyCombatStateChanged(e)
    if not bTrees then return end
 
-   print("Received a combat state update from ",e.sender,e.combatState)
-   enemyCombatStates[sender.id] = e.combatState
+   gutils.print("Received a combat state update from ", e.sender, e.combatState, 1)
+   enemyCombatStates[e.sender.id] = e.combatState
    if e.combatState == enums.COMBAT_STATE.MERCY and imACompanion and next(combatTargets) then
       -- This NPC surrenders, companions shall show mercy
       if math.random() <= CompanionMercyProb then

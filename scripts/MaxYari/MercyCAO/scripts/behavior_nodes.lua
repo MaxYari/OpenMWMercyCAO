@@ -336,9 +336,10 @@ function StartAttack(config)
             attack = attacks[math.random(1, #attacks)]
         end
 
-        self.ATTACK_TYPE = omwself.ATTACK_TYPE[attack.type]
+        -- self.attack_type = 5 -- for testing
+        self.attack_type = omwself.ATTACK_TYPE[attack.type]
 
-        state.attack = self.ATTACK_TYPE
+        state.attack = self.attack_type
     end
 
     config.run = function(self, state)
@@ -360,7 +361,7 @@ function StartAttack(config)
             end
         end
 
-        state.attack = self.ATTACK_TYPE
+        state.attack = self.attack_type
 
         return self:running()
     end
