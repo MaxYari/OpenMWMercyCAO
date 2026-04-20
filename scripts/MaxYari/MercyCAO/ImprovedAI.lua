@@ -771,10 +771,7 @@ local function onUpdate(dt)
       omwself.controls.run = state.run
       omwself.controls.movement = state.movement
       omwself.controls.sideMovement = state.sideMovement
-      omwself.controls.use = state.attack
-      print("Use:",omwself.controls.use,state.attack)
-      print("ATTACK_TYPE:")
-      view(omwself.ATTACK_TYPE)
+      omwself.controls.use = state.attack      
       omwself.controls.jump = state.jump
 
       -- If no lookDirection provided - default behaviour is to stare at the enemy
