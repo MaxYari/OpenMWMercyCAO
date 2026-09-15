@@ -23,7 +23,7 @@ local I = require('openmw.interfaces')
 if not Events and I.MercyCAO then Events = I.MercyCAO.Events end
 
 
-local BT = require('scripts.behaviourtreelua2e.lib.behaviour_tree')
+local BT = require(mp .. "libs/behaviourtreelua2e/lib/behaviour_tree")
 
 local NavigationService = require(mp .. "scripts/navservice")
 local navService = NavigationService({

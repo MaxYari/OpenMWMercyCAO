@@ -32,7 +32,7 @@ _BehaviourTreeImports = {
    loadCodeInScope = util.loadCode,
    clock = core.getRealTime
 }
-local BT = require('scripts.behaviourtreelua2e.lib.behaviour_tree')
+local BT = require(mp .. "libs/behaviourtreelua2e/lib/behaviour_tree")
 local luaRandom = require(mp .. "libs/randomlua")
 ----------------------------------------------------------------------------
 
