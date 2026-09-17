@@ -107,7 +107,7 @@ function MeanSampler:new(time_window)
     -- Define the sample function for the sampler instance
     function obj:sample(value)
         -- Get the current time
-        local current_time = core.getRealTime()
+        local current_time = core.getSimulationTime()
 
 
         -- Add the new value and its timestamp to the values array
@@ -226,7 +226,7 @@ local function cache(fn, delay)
     local c1, c2 = nil, nil
 
     return function(...)
-        local currentTime = core.getRealTime()
+        local currentTime = core.getSimulationTime()
         if currentTime - lastExecution < delay then
             return c1, c2, "cached"
         end
@@ -262,6 +262,32 @@ local function getActorLookRayPos(actor)
 end
 module.getActorLookRayPos = getActorLookRayPos
 
+-- Eye position as the engine takes it for line of sight: collision box center plus 0.9 of its half height.
+-- A standing actor's box starts at its feet, so the center is one half height above its position.
+local function getActorEyePos(actor)
+    local halfHeight = types.Actor.getPathfindingAgentBounds(actor).halfExtents.z
+    return actor.position + util.vector3(0, 0, halfHeight * 1.9)
+end
+module.getActorEyePos = getActorEyePos
+
+-- Line of sight checked the way the engine does it: eye to eye, blocked by world, terrain and doors, but not by actors
+local function hasLineOfSight(actor, target)
+    local result = nearby.castRay(getActorEyePos(actor), getActorEyePos(target), {
+        collisionType = nearby.COLLISION_TYPE.World + nearby.COLLISION_TYPE.HeightMap + nearby.COLLISION_TYPE.Door
+    })
+    return not result.hit
+end
+module.hasLineOfSight = hasLineOfSight
+
+-- The same line of sight check, from the eyes of an actor with the given half height standing at 'position'
+local function hasLineOfSightFromPoint(position, halfHeight, target)
+    local result = nearby.castRay(position + util.vector3(0, 0, halfHeight * 1.9), getActorEyePos(target), {
+        collisionType = nearby.COLLISION_TYPE.World + nearby.COLLISION_TYPE.HeightMap + nearby.COLLISION_TYPE.Door
+    })
+    return not result.hit
+end
+module.hasLineOfSightFromPoint = hasLineOfSightFromPoint
+
 local function getDistanceToBounds(actor, target)
     local dist = (target.position - actor.position):length() -
         types.Actor.getPathfindingAgentBounds(target).halfExtents.y -
@@ -283,7 +309,8 @@ module.lerpClamped = lerpClamped
 
 
 local function isMarksmanWeapon(weapon)
-    if not weapon then return false end
+    -- CarriedRight can also hold lockpicks and probes, which have no Weapon record
+    if not weapon or not types.Weapon.objectIsInstance(weapon) then return false end
     local weaponRecord = types.Weapon.record(weapon.recordId)
     return weaponRecord.type == types.Weapon.TYPE.MarksmanBow or
         weaponRecord.type == types.Weapon.TYPE.MarksmanCrossbow or
@@ -333,14 +360,15 @@ function Actor:__index(key)
     end
 end
 
-function Actor:getDumpableInventoryItems()
-    -- data.actor, data.position
+function Actor:getDumpableInventoryItems(excludedIds)
+    -- excludedIds: map of lowercase record ids that should never be dumped (bound items, user exclusions)
     local items = {}
     local inventory = self:inventory()
     --print("Inventory resolved:", inventory:isResolved())
     local invItems = inventory:getAll()
 
     for i, item in pairs(invItems) do
+        if excludedIds and excludedIds[item.recordId] then goto continue end
         if (types.Armor.objectIsInstance(item) or types.Clothing.objectIsInstance(item)) and self:hasEquipped(item) then goto continue end
         table.insert(items, item)
         ::continue::
@@ -572,7 +600,7 @@ local targetsHistory = {}
 local function addTargetsToHistory(targets)
     -- Author: mostly ChatGPT 2024
     local timeLimit = 5
-    local now = core.getRealTime()
+    local now = core.getSimulationTime()
     for _, target in ipairs(targets) do
         targetsHistory[target] = now
     end

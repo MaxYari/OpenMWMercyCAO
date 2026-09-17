@@ -8,12 +8,13 @@ local enums = require(mp .. "scripts/enums")
 local animManager = require(mp .. "scripts/anim_manager")
 local voiceManager = require(mp .. "scripts/voice_manager")
 local EventsManager = require(mp .. "scripts/events_manager")
+local magicUtil = require(mp .. "scripts/magic_util")
+local manaPotions = require(mp .. "scripts/mana_potions")
 
 -- OpenMW libs
 local omwself = require('openmw.self')
 local selfActor = gutils.Actor:new(omwself)
 local core = require('openmw.core')
-local nearby = require("openmw.nearby")
 local AI = require('openmw.interfaces').AI
 local util = require('openmw.util')
 local types = require('openmw.types')
@@ -30,7 +31,8 @@ end
 -- Setup important global functions for the behaviourtree 2e module to use--
 _BehaviourTreeImports = {
    loadCodeInScope = util.loadCode,
-   clock = core.getRealTime
+   -- Simulation time doesn't advance while the game is paused
+   clock = core.getSimulationTime
 }
 local BT = require(mp .. "libs/behaviourtreelua2e/lib/behaviour_tree")
 local luaRandom = require(mp .. "libs/randomlua")
@@ -51,6 +53,38 @@ Events = EventsManager:new()
 -- GSMTs
 local fCombatDistance = core.getGMST("fCombatDistance")
 local fHandToHandReach = core.getGMST("fHandToHandReach")
+-- Ranges the engine attacks from: marksman weapons and ranged spells (see aicombataction.cpp)
+local fProjectileMaxSpeed = core.getGMST("fProjectileMaxSpeed")
+local spellCombatRange = fCombatDistance * math.max(2, fHandToHandReach) * 4
+-- Being spotted while sneaking or hiding (state:spotted): the enemy has to face the NPC within this angle (degrees).
+-- A watched NPC reacts after a random delay in these ranges (seconds): with the enemy in front of it, or behind it (it
+-- doesn't see the enemy well).
+local SPOTTED_ANGLE = 45
+local SPOTTED_FRONT_DELAY_MIN, SPOTTED_FRONT_DELAY_MAX = 0.5, 1.5
+local SPOTTED_BEHIND_DELAY_MIN, SPOTTED_BEHIND_DELAY_MAX = 1.0, 2.0
+-- Within this distance (4 m) the NPC reacts after SPOTTED_CLOSE_DELAY instead, whichever way it faces
+local SPOTTED_CLOSE_DISTANCE = 4 * 69.99
+local SPOTTED_CLOSE_DELAY = 0.3
+-- A hiding NPC that sees its enemy swing a weapon at it from within reach comes out this many seconds later, even when
+-- it's still invisible
+local HIDE_THREAT_DELAY = 0.5
+-- While on the move after Vanish (repositioning, running to a hiding spot), only a hit of at least this share of
+-- base health interrupts it, so damage over time doesn't
+local MOVING_DAMAGE_THRESHOLD = 0.05
+-- Scaredness (state:scaredness): an NPC's inclination to run away from its enemy, from the level gap alone: 1 for the
+-- same level, doubling for an NPC SCARED_LEVEL_RANGE or more levels below its enemy and halving for one that many levels
+-- above, smoothly in between (2 ^ (gap / range)). Chances scaled by it are kept between SCARED_MIN_CHANCE and
+-- SCARED_MAX_CHANCE.
+local SCARED_LEVEL_RANGE = 10
+local SCARED_MIN_CHANCE, SCARED_MAX_CHANCE = 0.1, 0.9
+-- Base chances of running off to hide (see state:hideChance): after Vanish rather than repositioning (scaled by
+-- scaredness too), and when retreating rather than retreating towards friends
+local VANISH_HIDE_BASE_CHANCE = 0.5
+local RETREAT_HIDE_BASE_CHANCE = 0.5
+-- Base chance of getting scared (retreat or surrender) from a big enough hit while badly hurt, for an even match
+local SCARED_BASE_CHANCE = 0.2
+-- A hiding NPC isn't spotted by enemies further away than this: the engine's sneak check range, but at least 1000
+local HIDE_NOTICE_RANGE = math.max(1000, core.getGMST("fSneakUseDist"))
 
 -- Navigation service
 local NavigationService = require(mp .. "scripts/navservice")
@@ -62,7 +96,6 @@ local navService = NavigationService({
 
 -- Actor type variables
 local spellCastersAreVanilla = true
-local isSpellCaster = selfActor:isSpellCaster()
 local isGuard = selfActor:isAGuard() 
 -- Data containers
 local bTrees = nil
@@ -102,6 +135,37 @@ local state = {
    jumpInc = 0,
    zoomiesInc = 0,
 
+   -- Warning (STAND_GROUND) fields, updated by the main loop
+   warnsLeft = nil,         -- Patience: how many more times this NPC will warn instead of fighting. Rolled once and saved.
+   warnRequested = false,   -- Set when the enemy is seen again and the NPC warns again, cleared by the tree
+   enemyLostFor = 0,        -- Seconds since the enemy was last in line of sight
+   lostSightTime = 2,       -- Out of sight for this long counts as lost
+   lastSeenPos = nil,
+   standGroundOrigin = nil, -- Where the NPC stood when it warned, it walks back here after looking around
+   investigateProb = 40,    -- 0-100 chance to come looking where the enemy was last seen, set from settings
+   sneakUpProb = 20,        -- 0-100 chance to sneak up on the enemy instead, rolled first
+   sneakingUp = false,      -- Set by the tree while sneaking up on the enemy
+   caught = false,          -- Set by the tree once the enemy noticed the sneaking NPC
+   ambushAttack = false,    -- Sneaking up ended in melee range: the Combat tree does one attack right away
+   enemyInSight = false,    -- Result of the last line of sight check while warning
+
+   -- Magic fields
+   castables = nil,         -- What magic the engine might cast, scanned on combat start (magic_util.scanCastables)
+   customSpells = {},       -- Record ids of Mercy's own spells by key, sent by the global script
+   knownCustomSpells = {},  -- Custom spell keys this actor knows, updated on combat start
+   magicBusy = false,       -- A magic action is in progress: Mercy casting, or a handover window to the engine
+   castingCustom = false,   -- Mercy is casting a custom spell right now
+   pitchTarget = nil,       -- Pitch Mercy steers towards while aiming (radians, positive looks down)
+   aimDirection = nil,      -- Horizontal direction Mercy turns to while aiming, wins over lookDirection
+   customSpellCooldowns = {}, -- Custom spell key -> simulation time its cooldown ends
+   customSpellMisses = {},    -- Custom spell key -> misses in a row since its last cooldown
+   customSpellMissedAt = {},  -- Custom spell key -> simulation time of its last miss
+   repositioning = false,     -- Moving to repositionPoint (e.g. while invisible), set by the tree
+   repositionPoint = nil,     -- Where to reposition to, picked by PickRepositionPoint
+   hideSpotReady = false,     -- The HIDE state starts with a hiding spot already picked in repositionPoint
+   hideModifier = 1,          -- Scales every chance to run off and hide (see hideChance), set from settings
+   isCompanion = false,       -- Follows or escorts the player, updated with the combat targets
+
    clear = function(self)
       -- Fields below will be reset every frame
       self.vanillaBehavior = false
@@ -112,7 +176,181 @@ local state = {
       self.movement = 0
       self.sideMovement = 0
       self.lookDirection = nil
+      self.turnRate = nil
       self.range = 1e42
+      self.sneak = false
+   end,
+
+   -- Close enough to strike from where the NPC is sneaking: melee reach, or with the enemy in sight, the range the
+   -- engine attacks from with marksman weapons and ranged spells
+   inStrikingRange = function(self)
+      local stance = self.detStance
+      if stance == gutils.Actor.DET_STANCE.Melee then return self.range <= self.reach end
+      if not self.enemyInSight then return false end
+      if stance == gutils.Actor.DET_STANCE.Marksman then return self.range <= fProjectileMaxSpeed end
+      if stance == gutils.Actor.DET_STANCE.Spell then return self.range <= spellCombatRange end
+      return false
+   end,
+   isMelee = function(self)
+      return self.detStance == gutils.Actor.DET_STANCE.Melee
+   end,
+
+   -- Hand the actor to the engine for a moment so it can pick a spell: only if it has magic it could cast right now,
+   -- isn't attacking or staggered, and is out of melee reach (the engine would swing or turn to face first otherwise)
+   canHandOverForMagic = function(self)
+      if not spellCastersAreVanilla or self.magicBusy or self.repositioning or self.combatState == enums.COMBAT_STATE.HIDE
+         or not self.castables or not self.castables.canUseMagic then
+         return false
+      end
+      if self.attackState ~= enums.ATTACK_STATE.NO_STATE or self.staggerGroup or self.range <= self.reach then
+         return false
+      end
+      return magicUtil.canAttemptCastNow(omwself, self.castables)
+   end,
+   -- Whether Mercy can cast one of its custom spells (by key, e.g. "levitateBolt") right now. When it can't, the reason
+   -- is left in castBlockReason for debug logging.
+   canCastCustom = function(self, key)
+      local spellId = self.customSpells[key]
+      local reason = nil
+      if not spellId or not self.knownCustomSpells[key] then reason = "doesn't know the spell"
+      -- Learned in a game where a mod it needs (e.g. Lua Physics) was installed, but isn't anymore
+      elseif not magicUtil.isAvailable(key) then reason = "not available in this game"
+      elseif self.magicBusy then reason = "busy with other magic"
+      elseif self.repositioning then reason = "repositioning"
+      elseif self.combatState == enums.COMBAT_STATE.HIDE then reason = "hiding"
+      elseif not self.enemyActor then reason = "no enemy"
+      elseif magicUtil.CUSTOM_SPELLS[key].playerTargetOnly and not types.Player.objectIsInstance(self.enemyActor) then
+         reason = "only cast at the player"
+      elseif (self.customSpellCooldowns[key] or 0) > core.getSimulationTime() then reason = "on cooldown"
+      elseif self.attackState ~= enums.ATTACK_STATE.NO_STATE or self.staggerGroup then reason = "attacking or staggered"
+      elseif magicUtil.isCasting(omwself) then reason = "already casting"
+      elseif magicUtil.isSilenced(omwself) then reason = "silenced"
+      elseif not magicUtil.canAfford(omwself, spellId) then reason = "not enough magicka"
+      end
+      self.castBlockReason = reason
+      return reason == nil
+   end,
+   enemyHasEffect = function(self, effectId)
+      return self.enemyActor ~= nil and gutils.actorHasEffect(self.enemyActor, effectId)
+   end,
+   enemyInLineOfSight = function(self)
+      return self.enemyActor ~= nil and gutils.hasLineOfSight(omwself, self.enemyActor)
+   end,
+   selfHasEffect = function(self, effectId)
+      return gutils.actorHasEffect(omwself, effectId)
+   end,
+   -- One of Mercy's custom spells, cast by this actor, is active on it
+   customSpellActive = function(self, key)
+      local spellId = self.customSpells[key]
+      return spellId ~= nil and magicUtil.hasActiveSpellFrom(omwself, spellId, omwself.object)
+   end,
+   -- Dark enough for a light: any interior, or outside at night
+   isDark = function(self)
+      local cell = omwself.cell
+      if not cell.isExterior and not cell:hasTag("QuasiExterior") then return true end
+      local hour = (core.getGameTime() / 3600) % 24
+      return hour >= 20 or hour < 6
+   end,
+   -- Whether the enemy has spotted this sneaking or hiding NPC. The enemy has to be able to see it: within maxDistance,
+   -- with it in line of sight, and facing it (within SPOTTED_ANGLE). An enemy looking elsewhere is assumed not to see
+   -- it, and an NPC that's still invisible assumes it can't be seen. Being watched, the NPC reacts after a random
+   -- SPOTTED_FRONT_DELAY, or SPOTTED_BEHIND_DELAY with the enemy behind it, or SPOTTED_CLOSE_DELAY within
+   -- SPOTTED_CLOSE_DISTANCE. The enemy looking away starts that over. While being watched noticingSince is set. Checked at most every 0.25 s.
+   spotted = function(self, maxDistance)
+      local enemy = self.enemyActor
+      if not enemy then return false end
+      local now = core.getSimulationTime()
+      if now < (self.spottedCheckAt or 0) then return false end
+      self.spottedCheckAt = now + 0.25
+
+      local toMe = omwself.position - enemy.position
+      local enemyForward = enemy.rotation:apply(util.vector3(0, 1, 0))
+      local watched = toMe:length() <= maxDistance
+         and enemyForward:normalize():dot(toMe:normalize()) > math.cos(math.rad(SPOTTED_ANGLE))
+         and not gutils.actorHasEffect(omwself, "invisibility")
+         and gutils.hasLineOfSight(omwself, enemy)
+      if not watched then
+         if self.noticingSince then
+            magicUtil.log("Spotted check: no longer watched after", string.format("%.1f", now - self.noticingSince),
+               "s, distance", math.floor(toMe:length()))
+         end
+         self.noticingSince = nil
+         return false
+      end
+
+      local myForward = omwself.rotation:apply(util.vector3(0, 1, 0))
+      local enemyInFront = util.vector2(myForward.x, myForward.y):dot(util.vector2(-toMe.x, -toMe.y)) > 0
+      if not self.noticingSince then
+         self.noticingSince = now
+         self.noticeFrontDelay = SPOTTED_FRONT_DELAY_MIN + math.random() * (SPOTTED_FRONT_DELAY_MAX - SPOTTED_FRONT_DELAY_MIN)
+         self.noticeBehindDelay = SPOTTED_BEHIND_DELAY_MIN + math.random() * (SPOTTED_BEHIND_DELAY_MAX - SPOTTED_BEHIND_DELAY_MIN)
+      end
+      local close = toMe:length() <= SPOTTED_CLOSE_DISTANCE
+      local delay = close and SPOTTED_CLOSE_DELAY or (enemyInFront and self.noticeFrontDelay or self.noticeBehindDelay)
+      if now == self.noticingSince then
+         magicUtil.log("Spotted check: enemy is watching, distance", math.floor(toMe:length()), "- enemy",
+            close and "close" or (enemyInFront and "in front" or "behind"), "- reacting in", string.format("%.1f", delay),
+            "s if it keeps watching")
+      end
+      if now - self.noticingSince < delay then return false end
+      magicUtil.log("Spotted: watched for", string.format("%.1f", now - self.noticingSince), "s with the enemy",
+         enemyInFront and "in front" or "behind")
+      return true
+   end,
+   -- The NPC's inclination to run away from its enemy, see SCARED_LEVEL_RANGE
+   scaredness = function(self)
+      local enemy = self.enemyActor
+      if not enemy then return 1 end
+      local levelGap = types.Actor.stats.level(enemy).current - selfActor:levelStat().current
+      return 2 ^ (util.clamp(levelGap, -SCARED_LEVEL_RANGE, SCARED_LEVEL_RANGE) / SCARED_LEVEL_RANGE)
+   end,
+   -- A base chance (for an even match) scaled by scaredness and the Scared Probability Modifier setting, kept between
+   -- SCARED_MIN_CHANCE and SCARED_MAX_CHANCE. Always 0 when the modifier is 0 (guards and NPCs blacklisted from
+   -- surrendering).
+   scaredChance = function(self, baseChance)
+      if ScaredProbModifier <= 0 then return 0 end
+      return util.clamp(baseChance * self:scaredness() * ScaredProbModifier, SCARED_MIN_CHANCE, SCARED_MAX_CHANCE)
+   end,
+   -- A base chance of running off to hide scaled by the Hide Modifier setting (0 to 1). Every hiding decision goes
+   -- through it. The player's companions never hide.
+   hideChance = function(self, baseChance)
+      if self.isCompanion then return 0 end
+      return util.clamp(baseChance * self.hideModifier, 0, 1)
+   end,
+   -- Chance to hide after Vanish rather than reposition: also scaled by scaredness
+   vanishHideChance = function(self)
+      if self.hideModifier <= 0 or self.isCompanion then return 0 end
+      return self:scaredChance(self:hideChance(VANISH_HIDE_BASE_CHANCE))
+   end,
+   -- Chance to hide when retreating rather than retreat towards friends
+   retreatHideChance = function(self)
+      return self:hideChance(RETREAT_HIDE_BASE_CHANCE)
+   end,
+   -- Rolls whether to leave the fight and run away (RETREAT: to friends, or off to hide), e.g. after trapping the enemy.
+   -- 'baseChance' is for an even match, see scaredChance. Only from FIGHT. 'reason' is for debug logging.
+   rollRunAway = function(self, baseChance, reason)
+      -- The player's companions don't run off
+      if self.combatState ~= enums.COMBAT_STATE.FIGHT or self.isCompanion then return false end
+      local chance = self:scaredChance(baseChance)
+      local roll = math.random()
+      local runs = roll < chance
+      magicUtil.log("Run away roll after", reason, string.format("- scaredness %.2f, chance %.0f%%, rolled %.0f%%",
+         self:scaredness(), chance * 100, roll * 100), runs and "- running away" or "- keeps fighting")
+      if runs then self.combatState = enums.COMBAT_STATE.RETREAT end
+      return runs
+   end,
+   -- While hiding: found out once damaged or spotted
+   foundOut = function(self)
+      if self.hideDamaged then
+         magicUtil.log("Found out while hiding: took damage")
+         return true
+      end
+      if self.hideThreatenedAt then
+         if core.getSimulationTime() - self.hideThreatenedAt < HIDE_THREAT_DELAY then return false end
+         magicUtil.log("Found out while hiding: the enemy swung a weapon at it")
+         return true
+      end
+      return self:spotted(HIDE_NOTICE_RANGE)
    end,
 
    -- Functions to be used in the editor
@@ -218,36 +456,6 @@ end
 
 
 -- Functions to determine if its time to retreat/ask for mercy
--- Function to interpolate probability based on level difference
-local function levelBasedScaredProb()
-   -- Author: Mostly ChatGPT 2024
-   -- Directly assign numerical values for configuration
-   local minLevelDif = -10
-   local maxLevelDif = 10
-   local minProb = 0.05
-   local maxProb = 0.25
-
-   -- Get levels   
-   local characterLevel = selfActor:levelStat().current
-
-   if not state.enemyActorAux then return 0 end
-   local enemyLevel = state.enemyActorAux:levelStat().current
-
-   -- Calculate level difference
-   local levelDifference = characterLevel - enemyLevel
-
-   -- Clamp levelDifference within the min and max level range
-   local clampedLevelDifference = util.clamp(levelDifference, minLevelDif, maxLevelDif)
-
-   -- Normalize level difference within the range
-   local normalizedLevelDifference = (clampedLevelDifference - minLevelDif) / (maxLevelDif - minLevelDif)
-
-   -- Interpolate the probability
-   local probability = gutils.lerp(minProb, maxProb, normalizedLevelDifference)
-
-   return probability
-end
-
 -- Function to calculate if the character is scared
 local function isSelfScared(damageValue)
    -- Author: Mostly ChatGPT 2024
@@ -264,15 +472,11 @@ local function isSelfScared(damageValue)
       --print("Health fraction", healthFraction)
       -- Check if health is below 33%
       if healthFraction <= SurrenderHealthFraction then
-         -- Determine base probability based on level difference
-         local baseProbability = levelBasedScaredProb()
-
          -- Calculate the damage-based factor
          local damageFactor = damageValue / baseHealth
 
-         -- Adjust the probability based on the damage factor
-         local adjustedProbability = baseProbability * math.min(damageFactor / 0.05, 1)
-         local adjustedProbability = adjustedProbability * ScaredProbModifier
+         -- Scaredness-adjusted probability, scaled down for small hits
+         local adjustedProbability = state:scaredChance(SCARED_BASE_CHANCE) * math.min(damageFactor / 0.05, 1)
 
          -- Roll a random number to determine if the character is scared
          local roll = math.random()
@@ -358,7 +562,7 @@ end
 -- Interface ----------------------------------------------------------------
 -----------------------------------------------------------------------------
 local interface = {
-   version = 1.33,
+   version = 1.5,
    enabled = true,
    state = state,
    addExtension = function(treeName, combatState, stance, extensionConfig)
@@ -393,6 +597,13 @@ CompanionMercyProb = settings:get("CompanionMercyProb")
 StandGroundProbModifier = settings:get("StandGroundProbModifier")
 ScaredProbModifier = settings:get("ScaredProbModifier")
 SurrenderHealthFraction = settings:get("SurrenderHealthFraction")
+state.investigateProb = settings:get("InvestigateProb") * 100
+state.hideModifier = settings:get("HideModifier") or 1
+-- Shares of spellcasters, and of NPCs knowing no spells, that get Mercy's custom spells on their first fight
+local casterCustomSpellsChance = settings:get("CasterCustomSpellsChance") or 0
+local nonCasterCustomSpellsChance = settings:get("SpellcasterUpgradeChance") or 0
+-- Share of spellcasters that get a magicka potion on their first fight
+local manaPotionChance = settings:get("ManaPotionChance") or 0
 CanGoHamProb = 0.5
 BaseFriendFightVal = 80
 AvengeShoutProb = 0.5
@@ -414,24 +625,283 @@ local lastCombatState = nil
 local lastGoHamCheck = 0
 local retreatedOnce = false
 local askedForMercyOnce = false
-local stoodGroundOnce = false
+-- Custom spells rolled on the first fight: key -> learned spell record id, or false. nil until rolled. Saved.
+local learnedCustomSpells = nil
+local pitchSteered = false -- Pitch was changed while aiming and may still need levelling
+-- Debug logging of who drives the actor in combat and its stance, logged only when they change
+local lastControlOwner = nil
+local lastLoggedStance = nil
+local function noteControlOwner(owner, stance)
+   if owner ~= lastControlOwner then
+      magicUtil.log("Control:", lastControlOwner or "-", "->", owner, "| stance", stance)
+      lastControlOwner = owner
+   end
+end
+
+-- Custom spell hit tracking. A cast puts the spell on cooldown right away, so it isn't cast again while waiting to see
+-- whether it lands. Not landing within HIT_WINDOW is a miss: a miss lifts the cooldown, unless it's the
+-- CUSTOM_SPELL_MISSES_BEFORE_COOLDOWN'th miss in a row. A miss is forgotten once a full cooldown has passed since it.
+local HIT_WINDOW = 3
+local pendingSpellHit = nil
+
+state.onCustomSpellCast = function(self, key, target)
+   local spellId = self.customSpells[key]
+   local spell = spellId and core.magic.spells.records[spellId]
+   if not spell then return end
+   local now = core.getSimulationTime()
+   local definition = magicUtil.CUSTOM_SPELLS[key]
+   local cooldown = definition.cooldown or magicUtil.CUSTOM_SPELL_DEFAULT_COOLDOWN
+   self.customSpellCooldowns[key] = now + cooldown
+   -- The spell's own effect code, from its file in scripts/spells
+   if definition.onCast and target then
+      definition.onCast(omwself.object, target, self)
+      magicUtil.log(key, "cast effect triggered on", target.recordId)
+   end
+   -- Self spells always land, nothing to check
+   if spell.effects[1] and spell.effects[1].range == core.magic.RANGE.Self then
+      self.customSpellMisses[key] = 0
+      magicUtil.log(key, "cast on self - on cooldown")
+      return
+   end
+   if not target then return end
+   if (self.customSpellMisses[key] or 0) > 0 and now - (self.customSpellMissedAt[key] or 0) >= cooldown then
+      self.customSpellMisses[key] = 0
+   end
+   pendingSpellHit = { key = key, spellId = spellId, target = target, deadline = now + HIT_WINDOW }
+end
+
+local function checkCustomSpellHit(now)
+   local pending = pendingSpellHit
+   -- Only within the window: a check left pending when a fight ended mustn't trigger the spell's effect much later
+   local hit = now <= pending.deadline and pending.target:isValid()
+      and magicUtil.hasActiveSpellFrom(pending.target, pending.spellId, omwself.object)
+   if not hit and now < pending.deadline then return end
+   pendingSpellHit = nil
+
+   local key = pending.key
+   if hit then
+      state.customSpellMisses[key] = 0
+      magicUtil.log(key, "hit - stays on cooldown")
+      -- The spell's own effect code, from its file in scripts/spells
+      local definition = magicUtil.CUSTOM_SPELLS[key]
+      if definition.onHit then definition.onHit(omwself.object, pending.target, state) end
+      return
+   end
+
+   local misses = (state.customSpellMisses[key] or 0) + 1
+   if misses < magicUtil.CUSTOM_SPELL_MISSES_BEFORE_COOLDOWN then
+      state.customSpellCooldowns[key] = 0
+      state.customSpellMisses[key] = misses
+      state.customSpellMissedAt[key] = now
+      magicUtil.log(key, "missed", misses, "time(s) in a row - cooldown lifted")
+   else
+      state.customSpellMisses[key] = 0
+      magicUtil.log(key, "missed", misses, "times in a row - stays on cooldown")
+   end
+end
+-- While warning (STAND_GROUND): when the enemy was last in line of sight, and when it was last checked
+local lastSeenAt = 0
+local lastSightCheck = -1e42
+local SIGHT_CHECK_PERIOD = 0.25
+local GIVE_UP_TIME = 30 -- Out of sight for this long, a warning NPC leaves combat
+local SNEAK_GIVE_UP_TIME = 300 -- The same while sneaking up on the enemy
 
 -- Add variables for timing
-local lastAiPackageCheck = core.getRealTime() - math.random() * 0.5
+local lastAiPackageCheck = core.getSimulationTime() - math.random() * 0.5
 local activeAiPackage = { type = nil } -- Due to employed optimisation hack the type will always be either "Combat" or nil, it will never reflect Follow, Wander etc. package states
 local combatTargets = {}
 local escortTargets = {}
 local followTargets = {}
 local imACompanion = false
 local aiEnabled = true
+local sneakControlSet = false -- Mercy made the NPC sneak, the engine keeps the control until it's changed
 local enableAI = function (state)
    if not aiEnabled == state then
       aiEnabled = state
       omwself:enableAI(state)
+      -- Vanilla AI never touches sneak, so don't hand back an NPC that's still sneaking
+      if state and sneakControlSet then
+         omwself.controls.sneak = false
+         sneakControlSet = false
+      end
    end
 end
 
 local lastFleeValue = selfActor:aiFleeStat().modified
+
+-- Rolls whether to warn the enemy (STAND_GROUND) rather than fight, only while the NPC still has patience left
+local function rollWarn(enemyActor, damageValue)
+   if state.warnsLeft <= 0 or isGuard or damageValue > 0 then return false end
+   local fightValue = selfActor:aiFightStat().modified + gutils.getFightDispositionBias(omwself, enemyActor)
+   -- 90% at fight value 85 or less, down to 20% at 97 and above, scaled by the Stand Back Modifier setting
+   local standGroundProb = util.clamp(util.remap(fightValue, 85, 100, 0.9, 0), 0.2, 0.9) * StandGroundProbModifier
+   return luaRandom:random() <= standGroundProb
+end
+
+-- Every warning uses up one point of patience
+local function startWarning(enemyActor)
+   state.warnsLeft = state.warnsLeft - 1
+   state.combatState = enums.COMBAT_STATE.STAND_GROUND
+   state.standGroundOrigin = omwself.position
+   state.lastSeenPos = enemyActor.position
+   state.enemyLostFor = 0
+   state.staringProgress = 0
+   lastSeenAt = core.getSimulationTime()
+   -- Trees stop running when combat ends, so a sneak-up branch can be left mid-way. With these false it
+   -- aborts itself (Lost Sight's condition turns false) and clears the rest of its state.
+   state.sneakingUp = false
+   state.caught = false
+end
+
+-- Leaves combat with an enemy that was out of sight for too long. Fight isn't lowered, so the engine
+-- starts combat again once it spots them.
+local function giveUp(enemyActor)
+   gutils.print("Lost sight of ", enemyActor.recordId, " for too long, leaving combat", 1)
+   AI.filterPackages(function(package)
+      return not (package.type == "Combat" and package.target == enemyActor)
+   end)
+   activeAiPackage = { type = nil }
+   lastAiPackage = activeAiPackage
+   combatTargets = {}
+   state.combatState = enums.COMBAT_STATE.NO_STATE
+   enableAI(true)
+   selfActor:setStance(types.Actor.STANCE.Nothing)
+end
+
+-- Testing: spells from the player's "luamercy" console command, waiting to be learned. 'next' means they go to the next
+-- spellcaster that starts a fight rather than to this actor in particular.
+local pendingConsoleSpells = nil
+
+-- Per-frame combat work of the custom spells this actor knows (their 'combatUpdate'), run by the main loop in combat
+local spellCombatUpdates = {}
+local function updateSpellCombatUpdates()
+   spellCombatUpdates = {}
+   for key, known in pairs(state.knownCustomSpells) do
+      local definition = magicUtil.CUSTOM_SPELLS[key]
+      if known and definition and definition.combatUpdate then
+         spellCombatUpdates[#spellCombatUpdates + 1] = definition.combatUpdate
+      end
+   end
+end
+
+-- Replaces all of Mercy's custom spells this actor knows with the given keys, ready to cast
+local function learnCustomSpells(keys)
+   local actorSpells = types.Actor.spells(omwself)
+   for _, learnedId in pairs(learnedCustomSpells or {}) do
+      if learnedId then pcall(function() actorSpells:remove(learnedId) end) end
+   end
+   for _, spellId in pairs(state.customSpells) do
+      pcall(function() actorSpells:remove(spellId) end)
+   end
+   pendingSpellHit = nil
+   learnedCustomSpells = {}
+   for _, key in ipairs(keys) do
+      local spellId = state.customSpells[key]
+      if not magicUtil.isAvailable(key) then
+         magicUtil.log("Custom spell", key, "isn't available in this game, not learned")
+      elseif spellId then
+         actorSpells:add(spellId)
+         learnedCustomSpells[key] = spellId
+         state.customSpellCooldowns[key] = 0
+         state.customSpellMisses[key] = 0
+         magicUtil.log("Learned custom spell", key)
+      end
+   end
+   for key, spellId in pairs(state.customSpells) do
+      state.knownCustomSpells[key] = learnedCustomSpells[key] == spellId
+   end
+   updateSpellCombatUpdates()
+end
+
+local function learnConsoleSpells()
+   local request = pendingConsoleSpells
+   pendingConsoleSpells = nil
+   learnCustomSpells(request.keys)
+   local text = "Mercy: " .. omwself.recordId .. " now knows " .. table.concat(request.keys, ", ")
+   if request.player and request.player:isValid() then
+      request.player:sendEvent("Mercy_ConsoleSpellsLearned", { actor = omwself.object, next = request.next, text = text })
+   end
+end
+
+-- On combat start: scan what magic the engine might use, and on the first fight let a spellcaster (anyone knowing a
+-- normal spell) learn Mercy's custom spells
+local function prepareMagic()
+   lastControlOwner = nil
+   pendingSpellHit = nil
+   -- Custom spells are Mercy's to cast, they don't make handing the actor to the engine worthwhile
+   local customSpellIds = {}
+   for _, spellId in pairs(state.customSpells) do customSpellIds[spellId] = true end
+   state.castables = magicUtil.scanCastables(omwself, customSpellIds)
+
+   local actorSpells = types.Actor.spells(omwself)
+   local firstFightCaster = false
+   -- For the custom spell distribution: its level and what kind of character it is
+   local function distributionNpc()
+      local characterType = enums.CHARACTER_TYPE.Melee
+      if state.castables.knownSpellCount > 0 then
+         characterType = enums.CHARACTER_TYPE.Spellcaster
+      else
+         for _, weapon in ipairs(types.Actor.inventory(omwself):getAll(types.Weapon)) do
+            if gutils.isMarksmanWeapon(weapon) then
+               characterType = enums.CHARACTER_TYPE.Marksman
+               break
+            end
+         end
+      end
+      magicUtil.log("Custom spell distribution: level", selfActor:levelStat().current, characterType)
+      return { level = selfActor:levelStat().current, characterType = characterType }
+   end
+   if pendingConsoleSpells and (not pendingConsoleSpells.next or state.castables.knownSpellCount > 0) then
+      learnConsoleSpells()
+   elseif not learnedCustomSpells then
+      if state.castables.knownSpellCount > 0 then
+         firstFightCaster = true
+         if math.random() < casterCustomSpellsChance then
+            learnCustomSpells(magicUtil.rollCustomSpells(distributionNpc()))
+         else
+            learnCustomSpells({})
+            magicUtil.log("Spellcaster not picked for custom spells")
+         end
+      elseif math.random() < nonCasterCustomSpellsChance then
+         firstFightCaster = true
+         magicUtil.log("Knows no spells, upgraded to a spellcaster")
+         learnCustomSpells(magicUtil.rollCustomSpells(distributionNpc()))
+      else
+         learnedCustomSpells = {}
+         magicUtil.log("Knows no spells, gets no custom spells")
+      end
+   else
+      -- The global script recreates a custom spell when its definition changes: swap the old record for the new one
+      for key, learnedId in pairs(learnedCustomSpells) do
+         local currentId = state.customSpells[key]
+         if learnedId and currentId and learnedId ~= currentId then
+            pcall(function() actorSpells:remove(learnedId) end)
+            actorSpells:add(currentId)
+            learnedCustomSpells[key] = currentId
+            magicUtil.log("Updated custom spell", key, learnedId, "->", currentId)
+         end
+      end
+   end
+   for key, spellId in pairs(state.customSpells) do
+      state.knownCustomSpells[key] = learnedCustomSpells[key] == spellId
+   end
+   updateSpellCombatUpdates()
+
+   local knownCustomSpellIds = {}
+   for key, known in pairs(state.knownCustomSpells) do
+      if known and magicUtil.isAvailable(key) then knownCustomSpellIds[#knownCustomSpellIds + 1] = state.customSpells[key] end
+   end
+   manaPotions.onCombatStart(omwself.object, manaPotionChance, firstFightCaster, state.castables.cheapestSpellCost,
+      knownCustomSpellIds)
+
+   -- Some spells stay unused for a while after a fight starts
+   local now = core.getSimulationTime()
+   for key, definition in pairs(magicUtil.CUSTOM_SPELLS) do
+      if (definition.prewarm or 0) > 0 then
+         state.customSpellCooldowns[key] = math.max(state.customSpellCooldowns[key] or 0, now + definition.prewarm)
+      end
+   end
+end
 
 
 
@@ -470,6 +940,9 @@ local function STARTEVERYTHING(BTJsonData)
    -- Rndomising key npc factors
    luaRandom:randomseed(gutils.stringToHash(omwself.recordId))
    randomiseInclinations()
+
+   -- Patience is rolled once, a loaded game keeps the saved one
+   if state.warnsLeft == nil then state.warnsLeft = math.random(1, 3) end
 
    if isBlacklisted(blacklist.surrender_disable) or isGuard then
       gutils.print(omwself.recordId," Is BLACKLISTED from surrendering (blacklist match or is a guard).", 1)
@@ -529,8 +1002,27 @@ local function onUpdate(dt)
    state.damageValue = damageValue
    lastHealth = currentHealth
 
+   -- Damage ends invisibility tricks: a repositioning actor stops, a hiding one is found out. On the move only a hit of
+   -- at least MOVING_DAMAGE_THRESHOLD of base health counts, once sitting in the hiding spot any damage does.
+   local hidingNow = state.combatState == enums.COMBAT_STATE.HIDE
+   if damageValue > 0 and (state.repositioning or hidingNow) then
+      local bigHit = damageValue >= selfActor:healthStat().base * MOVING_DAMAGE_THRESHOLD
+      if state.repositioning and bigHit then
+         state.repositioning = false
+         magicUtil.log("Repositioning stopped: took", damageValue, "damage")
+      end
+      if hidingNow and not state.hideDamaged and (state.hideAtSpot or bigHit) then
+         state.hideDamaged = true
+         magicUtil.log("Took", damageValue, "damage while hiding", state.hideAtSpot and "in the spot" or "on the way")
+      end
+   end
+
    -- Time
-   local now = core.getRealTime()
+   local now = core.getSimulationTime()
+
+   if pendingSpellHit then checkCustomSpellHit(now) end
+   for i = 1, #spellCombatUpdates do spellCombatUpdates[i](state) end
+   manaPotions.combatUpdate(omwself.object, now)
 
 
    -- Storing combat targets in history
@@ -542,13 +1034,14 @@ local function onUpdate(dt)
    -- If we are not in a combat state - the engine will handle AI
    local shouldOverrideAI = true
    local detStance = selfActor:getDetailedStance()
+   if detStance ~= lastLoggedStance then
+      magicUtil.log("Stance:", lastLoggedStance or "-", "->", detStance)
+      lastLoggedStance = detStance
+   end
    if activeAiPackage.type ~= "Combat" or not enemyActor or types.Actor.isDead(enemyActor) or selfActor:isDead() then
       shouldOverrideAI = false
    end
-   -- Short circuit for mages in combat - temporary.
-   if state.combatState == enums.COMBAT_STATE.FIGHT and isSpellCaster and spellCastersAreVanilla then
-      shouldOverrideAI = false
-   end
+   -- Spellcasters are handed to the engine in short windows from the tree (Magic Window, see canHandOverForMagic)
    -- A small grace period when an empty target is detected in a cobat package. Allows engine to clean up.
    if not notargetDetectedAt then
       for _, target in ipairs(combatTargets) do
@@ -595,23 +1088,47 @@ local function onUpdate(dt)
 
    -- When we switch to combat - determine if we want to be hesitant (stand ground) or engage right away
    if lastAiPackage.type ~= activeAiPackage.type and activeAiPackage.type == "Combat" then
+      prepareMagic()
       -- Initialising combat state
       if enemyActor then                 
-         local fightBias = selfActor:aiFightStat().modified
-         local dispBias = gutils.getFightDispositionBias(omwself, enemyActor)
-         local fightValue = fightBias + dispBias
-         local standGroundProb = util.clamp(util.remap(fightValue, 85, 100, 0.9, 0), 0, 0.9)
-         standGroundProb = standGroundProb * StandGroundProbModifier
-         -- gutils.print("STAND GROUND PROBABILITY", standGroundProb, " Fight val: ", fightBias, dispBias, 1)
-         if luaRandom:random() <= standGroundProb and not stoodGroundOnce and not isGuard and damageValue <= 0 then
+         if rollWarn(enemyActor, damageValue) then
             core.sound.stopSay(omwself);
-            state.combatState = enums.COMBAT_STATE.STAND_GROUND
-            stoodGroundOnce = true
+            startWarning(enemyActor)
          else
             state.combatState = enums.COMBAT_STATE.FIGHT
          end
       else
          state.combatState = enums.COMBAT_STATE.FIGHT
+      end
+   end
+
+   -- While warning, track whether the enemy is in line of sight. Seen again after being lost - the warning is rolled
+   -- again, out of sight for too long - leave combat. Done before any fallback to vanilla AI, so it always runs.
+   if state.combatState == enums.COMBAT_STATE.STAND_GROUND and enemyActor then
+      local simNow = core.getSimulationTime()
+      if simNow - lastSightCheck >= SIGHT_CHECK_PERIOD then
+         lastSightCheck = simNow
+         state.enemyInSight = gutils.hasLineOfSight(omwself, enemyActor)
+         if state.enemyInSight then
+            -- Not while sneaking up, the tree carries on with that
+            if simNow - lastSeenAt >= state.lostSightTime and not state.sneakingUp then
+               if rollWarn(enemyActor, damageValue) then
+                  startWarning(enemyActor)
+                  state.warnRequested = true
+               else
+                  state.combatState = enums.COMBAT_STATE.FIGHT
+               end
+            end
+            lastSeenAt = simNow
+            state.lastSeenPos = enemyActor.position
+         end
+      end
+      state.enemyLostFor = simNow - lastSeenAt
+
+      local giveUpTime = state.sneakingUp and SNEAK_GIVE_UP_TIME or GIVE_UP_TIME
+      if state.combatState == enums.COMBAT_STATE.STAND_GROUND and state.enemyLostFor >= giveUpTime then
+         giveUp(enemyActor)
+         return
       end
    end
 
@@ -648,10 +1165,11 @@ local function onUpdate(dt)
       shouldOverrideAI = false
    end
 
-   -- if we can't find a nav path to enemy - fallback to vanilla behaviour
+   -- if we can't find a nav path to enemy - fallback to vanilla behaviour. Not while warning or hiding: those don't chase,
+   -- and vanilla AI would charge or drop combat instead.
    if enemyActor then
       state.navService:setTargetPos(enemyActor.position)
-      if #state.navService.path == 0 or (state.range and (state.navService.path[#state.navService.path] - enemyActor.position):length() > state.range) then
+      if state.combatState ~= enums.COMBAT_STATE.STAND_GROUND and state.combatState ~= enums.COMBAT_STATE.HIDE and (#state.navService.path == 0 or (state.range and (state.navService.path[#state.navService.path] - enemyActor.position):length() > state.range)) then
          shouldOverrideAI = false
       end
    end
@@ -674,7 +1192,10 @@ local function onUpdate(dt)
 
    -- Disabling AI so everything can be controlled by ~Mercy~
    enableAI(not shouldOverrideAI)
-   if not shouldOverrideAI then return end
+   if not shouldOverrideAI then
+      noteControlOwner("vanilla (fallback)", detStance)
+      return
+   end
 
 
    -- Provide Behaviour Tree state with the necessary info --------------
@@ -700,7 +1221,8 @@ local function onUpdate(dt)
    -- Get weapon stats
    local weaponObj = selfActor:getEquipment(types.Actor.EQUIPMENT_SLOT.CarriedRight)
    local weaponRecord = { id = nil }
-   if weaponObj then weaponRecord = types.Weapon.record(weaponObj.recordId) end
+   -- Lockpicks and probes also go into CarriedRight; treat them as hand-to-hand
+   if weaponObj and types.Weapon.objectIsInstance(weaponObj) then weaponRecord = types.Weapon.record(weaponObj.recordId) end
 
    if weaponRecord.id ~= lastWeaponRecord.id then
       if weaponRecord.id then
@@ -760,11 +1282,28 @@ local function onUpdate(dt)
    bTrees["Locomotion"]:run()
 
 
+   -- While Mercy casts a custom spell it drives the actor, even if a stance branch wants to hand it to the engine,
+   -- and it stands still while casting
+   if state.castingCustom then
+      state.vanillaBehavior = false
+      state.movement = 0
+      state.sideMovement = 0
+      if state.aimDirection then state.lookDirection = state.aimDirection end
+   end
+
+   -- While repositioning or hiding Mercy drives the actor whatever its stance, and keeps the stance it has
+   if state.repositioning or state.combatState == enums.COMBAT_STATE.HIDE then
+      state.vanillaBehavior = false
+      state.stance = selfActor:getStance()
+   end
+
    -- Apply state properties modified by behavior trees to actor controls ----
    if state.vanillaBehavior then
       enableAI(true)
+      noteControlOwner("vanilla (tree)", detStance)
       return
    else
+      noteControlOwner("mercy", detStance)
       if state.stance ~= selfActor:getStance() then
          selfActor:setStance(state.stance)
       end
@@ -773,6 +1312,8 @@ local function onUpdate(dt)
       omwself.controls.sideMovement = state.sideMovement
       omwself.controls.use = state.attack      
       omwself.controls.jump = state.jump
+      omwself.controls.sneak = state.sneak
+      sneakControlSet = state.sneak
 
       -- If no lookDirection provided - default behaviour is to stare at the enemy
       -- If an attack is in progress - force look at enemyActor
@@ -780,13 +1321,28 @@ local function onUpdate(dt)
       if state.attackState == enums.ATTACK_STATE.NO_STATE then
          lookDirection = state.lookDirection
       end
-      if not lookDirection and state.enemyActor then
+      -- Not while hiding: a hiding actor keeps its facing, so an enemy can come up behind it
+      if not lookDirection and state.enemyActor and state.combatState ~= enums.COMBAT_STATE.HIDE then
          lookDirection = state.enemyActor.position - omwself.position
       end
       if lookDirection then
          -- Actual rotation is changed somewhat gradually
          omwself.controls.yawChange = gutils.lerpClamped(0,
-            -moveutils.lookRotation(omwself, omwself.position + lookDirection), dt * 3)
+            -moveutils.lookRotation(omwself, omwself.position + lookDirection), dt * (state.turnRate or 3))
+      end
+
+      -- Pitch is only steered while a node aims (pitchTarget), then levelled back once
+      if state.pitchTarget or pitchSteered then
+         local forward = omwself.rotation:apply(util.vector3(0, 1, 0))
+         local pitch = -math.asin(util.clamp(forward.z, -1, 1)) -- positive looks down, like the engine
+         local pitchError = (state.pitchTarget or 0) - pitch
+         if math.abs(pitchError) > 0.01 then
+            omwself.controls.pitchChange = pitchError * math.min(1, dt * 8)
+            pitchSteered = true
+         else
+            omwself.controls.pitchChange = 0
+            pitchSteered = state.pitchTarget ~= nil
+         end
       end
    end
 
@@ -799,6 +1355,7 @@ local function onUpdate(dt)
 
    -- Notify everyone on a combat state change
    if state.combatState ~= lastCombatState then
+      magicUtil.log("Combat state:", lastCombatState or "-", "->", state.combatState)
       for _, target in ipairs(combatTargets) do
          target:sendEvent("Mercy_CombatStateChanged", { sender = omwself, combatState = state.combatState})
       end
@@ -817,6 +1374,51 @@ I.AnimationController.addPlayBlendedAnimationHandler(function(groupname, options
    -- Detect being staggered
    if gutils.stringStartsWith(groupname, "hit") then
       state.staggerGroup = groupname
+   end
+end)
+
+-- While sitting in a hiding spot: the enemy swinging a melee weapon (or fists) towards the NPC from within its reach,
+-- in front of the NPC and in its line of sight, gets it out of hiding after HIDE_THREAT_DELAY (see foundOut). The player
+-- script sends PlayerUse to nearby NPCs, one per frame, while use is held.
+Events:addEventHandler(function(e, data)
+   if e ~= "PlayerUse" or state.combatState ~= enums.COMBAT_STATE.HIDE or not state.hideAtSpot or state.hideThreatenedAt then
+      return
+   end
+   local enemy = state.enemyActor
+   if not enemy or data.source ~= enemy or not data.use or data.use <= 0 then return end
+   if types.Actor.getStance(enemy) ~= types.Actor.STANCE.Weapon then return end
+   local weapon = types.Actor.getEquipment(enemy, types.Actor.EQUIPMENT_SLOT.CarriedRight)
+   if gutils.isMarksmanWeapon(weapon) then return end
+   local reach = fHandToHandReach * fCombatDistance
+   if weapon and types.Weapon.objectIsInstance(weapon) then reach = types.Weapon.record(weapon).reach * fCombatDistance end
+   if gutils.getDistanceToBounds(omwself, enemy) > reach then return end
+
+   local toMe = omwself.position - enemy.position
+   local enemyForward = enemy.rotation:apply(util.vector3(0, 1, 0))
+   if enemyForward:normalize():dot(toMe:normalize()) < math.cos(math.rad(SPOTTED_ANGLE)) then return end
+   local myForward = omwself.rotation:apply(util.vector3(0, 1, 0))
+   if util.vector2(myForward.x, myForward.y):dot(util.vector2(-toMe.x, -toMe.y)) <= 0 then return end
+   if not gutils.hasLineOfSight(omwself, enemy) then return end
+
+   state.hideThreatenedAt = core.getSimulationTime()
+   magicUtil.log("Hiding: the enemy swings a weapon at it, coming out in", HIDE_THREAT_DELAY, "s")
+end)
+
+-- While Mercy makes this NPC sneak, or it's invisible in combat, cut its footsteps short. The engine plays them from 'soundgen: left/right' keys
+-- and Lua only hears about a key after the sound started, so roughly the first frame of each step still plays.
+local FOOTSTEP_SOUNDS = {
+   left = { "FootBareLeft", "footLightLeft", "FootMedLeft", "footHeavyLeft", "FootWaterLeft", "Swim Left" },
+   right = { "FootBareRight", "footLightRight", "FootMedRight", "footHeavyRight", "FootWaterRight", "Swim Right" },
+}
+I.AnimationController.addTextKeyHandler("soundgen", function(groupname, key)
+   if not sneakControlSet and not (activeAiPackage.type == "Combat" and gutils.actorHasEffect(omwself, "invisibility")) then
+      return
+   end
+   -- The key can carry volume and pitch after the side, e.g. "left 0.5 1"
+   local sounds = FOOTSTEP_SOUNDS[key:match("^%a+")]
+   if not sounds then return end
+   for _, soundId in ipairs(sounds) do
+      core.sound.stopSound3d(soundId, omwself)
    end
 end)
 
@@ -873,15 +1475,11 @@ local function onFriendDamaged(e)
       state.combatState = enums.COMBAT_STATE.FIGHT
    end
    if lastAiPackage.type ~= "Combat" then
-      local raycast = nearby.castRay(gutils.getActorLookRayPos(omwself),
-         gutils.getActorLookRayPos(e.source),
-         { collisionType = nearby.COLLISION_TYPE.World + nearby.COLLISION_TYPE.Door + nearby.COLLISION_TYPE.HeightMap })
-
-      if not raycast.hitObject then
+      if gutils.hasLineOfSight(omwself, e.source) then
          gutils.print("Friend " .. e.source.recordId .. " was attacked, starting a combat AI package", 1)
          AI.startPackage({ type = 'Combat', target = e.offender })
       else
-         gutils.print("Line of sight check hit " .. raycast.hitObject.recordId, 1)
+         gutils.print("Friend " .. e.source.recordId .. " was attacked out of line of sight", 1)
       end
    end
 end
@@ -933,7 +1531,8 @@ local function onTargetsChanged(e)
       -- Update follow and escort targets, updated only here for performance reasons
       followTargets = AI.getTargets("Follow")
       escortTargets = AI.getTargets("Escort")
-      imACompanion = isPlayerInTargets(followTargets) or isPlayerInTargets(escortTargets)      
+      imACompanion = isPlayerInTargets(followTargets) or isPlayerInTargets(escortTargets)
+      state.isCompanion = imACompanion      
    else
       activeAiPackage = {type = nil}
    end
@@ -942,30 +1541,63 @@ end
 
 -- Engine handlers ------------------------------------------------------------
 -------------------------------------------------------------------------------
+local eventHandlers = {
+   -- Own combat targets, sent to this actor by Max Yari's Script Services (MSS) whenever they change
+   MSS_CombatTargets = onTargetsChanged,
+   Mercy_StartupData = function(e)
+      gutils.print(omwself.recordId," Received startup data from Global", 1)
+      blacklist = e.blacklist
+      state.itemDumpExclusions = blacklist.item_dump_disable.recordIdsMap
+      state.customSpells = e.customSpells or {}
+      STARTEVERYTHING(e.b3projectJson)
+   end,
+   FriendDamaged = function(...)
+      Events:emit("FriendDamaged", ...)
+      onFriendDamaged(...)
+   end,
+   FriendDead = function(...)
+      Events:emit("FriendDead", ...)
+      onFriendDead(...)
+   end,
+   PlayerUse = function(...)
+      Events:emit("PlayerUse", ...)
+   end,
+   Mercy_CombatStateChanged = onEnemyCombatStateChanged,
+   -- Testing: custom spells from the player's "luamercy" console command. Given to this actor right away, or with 'next'
+   -- kept until it starts a fight as a spellcaster. 'cancel' drops a 'next' request another actor already took.
+   Mercy_ConsoleSpells = function(e)
+      if e.cancel then
+         if pendingConsoleSpells and pendingConsoleSpells.next then pendingConsoleSpells = nil end
+         return
+      end
+      pendingConsoleSpells = e
+      if not e.next and next(state.customSpells) then learnConsoleSpells() end
+   end,
+}
+-- Custom spells' own local event handlers, from their files in scripts/spells: as the caster, and as a possible target
+for _, spell in pairs(magicUtil.CUSTOM_SPELLS) do
+   for name, handler in pairs(spell.localEventHandlers or {}) do
+      eventHandlers[name] = function(data) handler(state, data) end
+   end
+   for name, handler in pairs(spell.targetEventHandlers or {}) do
+      eventHandlers[name] = handler
+   end
+end
+
 return {
    engineHandlers = {
       onUpdate = onUpdate,
+      onSave = function()
+         return { warnsLeft = state.warnsLeft, learnedCustomSpells = learnedCustomSpells }
+      end,
+      onLoad = function(data)
+         if data then
+            state.warnsLeft = data.warnsLeft
+            learnedCustomSpells = data.learnedCustomSpells
+         end
+      end,
    },
-   eventHandlers = {
-      OMWMusicHackCombatTargetsChanged = onTargetsChanged,
-      Mercy_StartupData = function(e)
-         gutils.print(omwself.recordId," Received startup data from Global", 1)
-         blacklist = e.blacklist
-         STARTEVERYTHING(e.b3projectJson)
-      end,
-      FriendDamaged = function(...)
-         Events:emit("FriendDamaged", ...)
-         onFriendDamaged(...)
-      end,
-      FriendDead = function(...)
-         Events:emit("FriendDead", ...)
-         onFriendDead(...)
-      end,
-      PlayerUse = function(...)
-         Events:emit("PlayerUse", ...)
-      end,
-      Mercy_CombatStateChanged = onEnemyCombatStateChanged,
-   },
+   eventHandlers = eventHandlers,
    interfaceName = "MercyCAO",
    interface = interface
 }

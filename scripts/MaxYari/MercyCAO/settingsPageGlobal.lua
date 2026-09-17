@@ -1,12 +1,24 @@
 local storage = require('openmw.storage')
 local I = require('openmw.interfaces')
 
+-- A settings-less group, only a warning shown between the general settings (above) and the behaviour ones (below)
+I.Settings.registerGroup {
+    key = 'SettingsMercyCAOSpoilerWarning',
+    page = 'MercyCAOPage',
+    l10n = 'MercyCAO',
+    name = '!!! WARNING: READ THIS BEFORE SCROLLING DOWN !!!',
+    order = 2,
+    permanentStorage = true,
+    description = "Below you can adjust the probabilities of many of Mercy's behaviours and spells, but their names and descriptions are spoilers: they tell you what NPCs can do.\n\nI STRONGLY recommend to just play the mod first and have a sense of wonder.",
+    settings = {},
+}
+
 I.Settings.registerGroup {
     key = 'SettingsMercyCAOBehavior',
     page = 'MercyCAOPage',
     l10n = 'MercyCAO',
     name = 'Behavior Modifiers',
-    order = 1,
+    order = 3,
     permanentStorage = true,
     description = "'Modifier' Values below function as probability multipliers and have no upper limit, set them to an arbitrary high value (e.g 10000) if you want to force the corresponding behaviour to always appear.",
     settings = {
@@ -20,6 +32,60 @@ I.Settings.registerGroup {
             },
             name = 'Stand Back Modifier',
             description = 'Higher values make NPC more likely to hesitate and warn the player before engaging in combat.',
+        },
+        {
+            key = 'InvestigateProb',
+            renderer = 'number',
+            default = 0.4,
+            argument = {
+                min = 0,
+                max = 1,
+            },
+            name = 'Come Looking Probability',
+            description = 'A probability (in 0 - 1 range) that an NPC who warned the player and then lost sight of them will come to where they last saw the player to look around.',
+        },
+        {
+            key = 'HideModifier',
+            renderer = 'number',
+            default = 1,
+            argument = {
+                min = 0,
+            },
+            name = 'Hide Modifier',
+            description = 'Scales every chance of an NPC running off to hide until found out: after turning invisible (rather than repositioning around the player), when retreating (rather than retreating towards friends) and after blinking the player out of sight. 0 disables hiding, higher values make it more likely.',
+        },
+        {
+            key = 'CasterCustomSpellsChance',
+            renderer = 'number',
+            default = 0.666,
+            argument = {
+                min = 0,
+                max = 1,
+            },
+            name = 'Spellcaster Custom Spells Chance',
+            description = 'A probability (in 0 - 1 range) that a spellcasting NPC gets Mercy\'s custom spells on their first fight.',
+        },
+        {
+            key = 'SpellcasterUpgradeChance',
+            renderer = 'number',
+            default = 0.1,
+            argument = {
+                min = 0,
+                max = 1,
+            },
+            name = 'Non-Caster Custom Spells Chance',
+            description = 'A probability (in 0 - 1 range) that an NPC who knows no spells still gets Mercy\'s custom spells on their first fight, as if they were a spellcaster.',
+        },
+        {
+            key = 'ManaPotionChance',
+            renderer = 'number',
+            default = 0.5,
+            argument = {
+                min = 0,
+                max = 1,
+            },
+            name = 'Mana Potion Chance',
+            description = 'A probability (in 0 - 1 range) that a spellcasting NPC gets a level appropriate Restore Magicka potion on their first fight. They drink it a few seconds after running out of magicka for their spells.',
         },
         {
             key = 'ScaredProbModifier',
@@ -62,7 +128,7 @@ I.Settings.registerGroup {
     page = 'MercyCAOPage',
     l10n = 'MercyCAO',
     name = 'Audio',    
-    order = 2,
+    order = 1,
     permanentStorage = true,
     settings = {        
         {

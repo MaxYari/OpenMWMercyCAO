@@ -13,10 +13,21 @@ local COMBAT_STATE = {
     STAND_GROUND = "STAND_GROUND",
     FIGHT = "FIGHT",
     RETREAT = "RETREAT",
-    MERCY = "MERCY"
+    MERCY = "MERCY",
+    -- Runs off to a hiding spot and sneaks there until found out, then fights. Entered from other states' behaviours.
+    HIDE = "HIDE"
+}
+
+-- What kind of character an NPC is, e.g. for who gets which of Mercy's custom spells. All matches any of them.
+local CHARACTER_TYPE = {
+    Spellcaster = "Spellcaster", -- Knows spells
+    Marksman = "Marksman",       -- Knows no spells, carries a marksman weapon
+    Melee = "Melee",             -- Knows no spells, no marksman weapon
+    All = "All"
 }
 
 return {
     ATTACK_STATE = ATTACK_STATE,
-    COMBAT_STATE = COMBAT_STATE
+    COMBAT_STATE = COMBAT_STATE,
+    CHARACTER_TYPE = CHARACTER_TYPE
 }
