@@ -198,7 +198,10 @@ local state = {
    -- Hand the actor to the engine for a moment so it can pick a spell: only if it has magic it could cast right now,
    -- isn't attacking or staggered, and is out of melee reach (the engine would swing or turn to face first otherwise)
    canHandOverForMagic = function(self)
+      -- A custom spell waiting for the current cast or attack to end gets the next opening, not the engine
+      local customSpellReserved = (self.customSpellReservedUntil or 0) > core.getSimulationTime()
       if not spellCastersAreVanilla or self.magicBusy or self.repositioning or self.combatState == enums.COMBAT_STATE.HIDE
+         or customSpellReserved
          or not self.castables or not self.castables.canUseMagic then
          return false
       end
@@ -208,22 +211,25 @@ local state = {
       return magicUtil.canAttemptCastNow(omwself, self.castables)
    end,
    -- Whether Mercy can cast one of its custom spells (by key, e.g. "levitateBolt") right now. When it can't, the reason
-   -- is left in castBlockReason for debug logging.
+   -- is left in castBlockReason for debug logging, and castBlockTransient is set when the reason is a cast or attack in
+   -- progress, which will soon be over (see PeriodicInterrupt).
    canCastCustom = function(self, key)
       local spellId = self.customSpells[key]
       local reason = nil
       if not spellId or not self.knownCustomSpells[key] then reason = "doesn't know the spell"
       -- Learned in a game where a mod it needs (e.g. Lua Physics) was installed, but isn't anymore
       elseif not magicUtil.isAvailable(key) then reason = "not available in this game"
-      elseif self.magicBusy then reason = "busy with other magic"
+      elseif self.magicBusy then reason = "busy with other magic"; self.castBlockTransient = true
       elseif self.repositioning then reason = "repositioning"
       elseif self.combatState == enums.COMBAT_STATE.HIDE then reason = "hiding"
       elseif not self.enemyActor then reason = "no enemy"
       elseif magicUtil.CUSTOM_SPELLS[key].playerTargetOnly and not types.Player.objectIsInstance(self.enemyActor) then
          reason = "only cast at the player"
+      elseif (self.customSpellRestUntil or 0) > core.getSimulationTime() then reason = "resting after spells back to back"
       elseif (self.customSpellCooldowns[key] or 0) > core.getSimulationTime() then reason = "on cooldown"
-      elseif self.attackState ~= enums.ATTACK_STATE.NO_STATE or self.staggerGroup then reason = "attacking or staggered"
-      elseif magicUtil.isCasting(omwself) then reason = "already casting"
+      elseif self.attackState ~= enums.ATTACK_STATE.NO_STATE or self.staggerGroup then
+         reason = "attacking or staggered"; self.castBlockTransient = true
+      elseif magicUtil.isCasting(omwself) then reason = "already casting"; self.castBlockTransient = true
       elseif magicUtil.isSilenced(omwself) then reason = "silenced"
       elseif not magicUtil.canAfford(omwself, spellId) then reason = "not enough magicka"
       end
@@ -319,12 +325,27 @@ local state = {
    end,
    -- Chance to hide after Vanish rather than reposition: also scaled by scaredness
    vanishHideChance = function(self)
-      if self.hideModifier <= 0 or self.isCompanion then return 0 end
-      return self:scaredChance(self:hideChance(VANISH_HIDE_BASE_CHANCE))
+      local chance = 0
+      if self.hideModifier > 0 and not self.isCompanion then
+         -- The Hide Modifier goes last, so high values do force hiding
+         chance = self:hideChance(self:scaredChance(VANISH_HIDE_BASE_CHANCE))
+      end
+      self:logHideChance("Vanish", chance)
+      return chance
    end,
    -- Chance to hide when retreating rather than retreat towards friends
    retreatHideChance = function(self)
-      return self:hideChance(RETREAT_HIDE_BASE_CHANCE)
+      local chance = self:hideChance(RETREAT_HIDE_BASE_CHANCE)
+      self:logHideChance("Retreat", chance)
+      return chance
+   end,
+   -- Debug log of a hiding decision's chance, once per frame (a weighted choice reads it for each of its options)
+   logHideChance = function(self, what, chance)
+      local now = core.getSimulationTime()
+      if self.hideChanceLoggedAt == now then return end
+      self.hideChanceLoggedAt = now
+      magicUtil.log(what, string.format("hide chance %.0f%% (Hide Modifier %s, scaredness %.2f%s)", chance * 100,
+         tostring(self.hideModifier), self:scaredness(), self.isCompanion and ", companion: never hides" or ""))
    end,
    -- Rolls whether to leave the fight and run away (RETREAT: to friends, or off to hide), e.g. after trapping the enemy.
    -- 'baseChance' is for an even match, see scaredChance. Only from FIGHT. 'reason' is for debug logging.
@@ -600,10 +621,12 @@ SurrenderHealthFraction = settings:get("SurrenderHealthFraction")
 state.investigateProb = settings:get("InvestigateProb") * 100
 state.hideModifier = settings:get("HideModifier") or 1
 -- Shares of spellcasters, and of NPCs knowing no spells, that get Mercy's custom spells on their first fight
-local casterCustomSpellsChance = settings:get("CasterCustomSpellsChance") or 0
-local nonCasterCustomSpellsChance = settings:get("SpellcasterUpgradeChance") or 0
+local magicSettings = storage.globalSection('SettingsMercyCAOMagic')
+local casterCustomSpellsChance = magicSettings:get("CasterCustomSpellsChance") or 0
+local nonCasterCustomSpellsChance = magicSettings:get("SpellcasterUpgradeChance") or 0
+local extraSpellsForHighLevelCasters = magicSettings:get("ExtraSpellsForHighLevelCasters") ~= false
 -- Share of spellcasters that get a magicka potion on their first fight
-local manaPotionChance = settings:get("ManaPotionChance") or 0
+local manaPotionChance = magicSettings:get("ManaPotionChance") or 0
 CanGoHamProb = 0.5
 BaseFriendFightVal = 80
 AvengeShoutProb = 0.5
@@ -849,7 +872,8 @@ local function prepareMagic()
          end
       end
       magicUtil.log("Custom spell distribution: level", selfActor:levelStat().current, characterType)
-      return { level = selfActor:levelStat().current, characterType = characterType }
+      return { level = selfActor:levelStat().current, characterType = characterType,
+         extraSpellRolls = extraSpellsForHighLevelCasters }
    end
    if pendingConsoleSpells and (not pendingConsoleSpells.next or state.castables.knownSpellCount > 0) then
       learnConsoleSpells()
@@ -1291,10 +1315,12 @@ local function onUpdate(dt)
       if state.aimDirection then state.lookDirection = state.aimDirection end
    end
 
-   -- While repositioning or hiding Mercy drives the actor whatever its stance, and keeps the stance it has
+   -- While repositioning or hiding Mercy drives the actor whatever its stance, and keeps the stance it has (spell or
+   -- weapon ready, so it doesn't lose time drawing it when it comes out). With nothing drawn it readies its weapon.
    if state.repositioning or state.combatState == enums.COMBAT_STATE.HIDE then
       state.vanillaBehavior = false
       state.stance = selfActor:getStance()
+      if state.stance == types.Actor.STANCE.Nothing then state.stance = types.Actor.STANCE.Weapon end
    end
 
    -- Apply state properties modified by behavior trees to actor controls ----
@@ -1369,11 +1395,21 @@ end
 -- Animation handlers -------------------------------------------------------------
 -----------------------------------------------------------------------------------
 
+-- Animation groups the Consuming Animated mod plays on NPCs (see its potionanim_shared.lua)
+local CONSUMING_ANIMATED_GROUPS = { potionl = true, eatingr = true, bugmusk2 = true, drinkbone = true, smokepipe1 = true,
+   skoomapipe = true, smoke1r = true }
+
 I.AnimationController.addPlayBlendedAnimationHandler(function(groupname, options)
    --print("New animation started! " .. groupname .. " : " .. options.startkey .. " --> " .. options.stopkey)
    -- Detect being staggered
    if gutils.stringStartsWith(groupname, "hit") then
       state.staggerGroup = groupname
+   end
+   -- Debug: drinking and eating animations from Consuming Animated, to see whether they get in the way of casting
+   if CONSUMING_ANIMATED_GROUPS[groupname] then
+      state.consumeAnimStartedAt = core.getSimulationTime()
+      magicUtil.log("Consuming animation started:", groupname, "| stance", selfActor:getDetailedStance(),
+         "| combat state", state.combatState, "| casting custom", state.castingCustom)
    end
 end)
 
@@ -1563,6 +1599,10 @@ local eventHandlers = {
       Events:emit("PlayerUse", ...)
    end,
    Mercy_CombatStateChanged = onEnemyCombatStateChanged,
+   -- Mana potions Mercy kept for this caster go into its inventory, to be looted
+   Died = function()
+      manaPotions.onDied(omwself.object)
+   end,
    -- Testing: custom spells from the player's "luamercy" console command. Given to this actor right away, or with 'next'
    -- kept until it starts a fight as a spellcaster. 'cancel' drops a 'next' request another actor already took.
    Mercy_ConsoleSpells = function(e)
@@ -1587,13 +1627,20 @@ end
 return {
    engineHandlers = {
       onUpdate = onUpdate,
+      -- Debug: anything this NPC consumes (a potion drunk by Mercy or by the engine's AI)
+      onConsume = function(item)
+         state.consumedAt = core.getSimulationTime()
+         magicUtil.log("Consumed", item.recordId, "| in combat", activeAiPackage.type == "Combat", "| AI by",
+            aiEnabled and "engine" or "mercy", "| stance", selfActor:getDetailedStance())
+      end,
       onSave = function()
-         return { warnsLeft = state.warnsLeft, learnedCustomSpells = learnedCustomSpells }
+         return { warnsLeft = state.warnsLeft, learnedCustomSpells = learnedCustomSpells, manaPotions = manaPotions.save() }
       end,
       onLoad = function(data)
          if data then
             state.warnsLeft = data.warnsLeft
             learnedCustomSpells = data.learnedCustomSpells
+            manaPotions.load(data.manaPotions)
          end
       end,
    },

@@ -41,7 +41,7 @@ env:
   # From the "Advanced" panel of the main file on Nexus. Not secret.
   NEXUSMODS_FILE_ID: "3316381"
   NEXUSMODS_MOD_ID: "429496784664" # internal mod ID, not the one from the page URL
-  FILE_DISPLAY_NAME: MercyCAO
+  FILE_DISPLAY_NAME: MercyCAO # Shown on Nexus as "MercyCAO v<version>"
   ZIP_NAME: MercyCAO
   VERSION_SOURCE: scripts/MaxYari/MercyCAO/ImprovedAI.lua
 
@@ -114,7 +114,7 @@ jobs:
           file_id: ${{ env.NEXUSMODS_FILE_ID }}
           mod_id: ${{ env.NEXUSMODS_MOD_ID }}
           filename: ${{ env.ZIP_NAME }}-${{ steps.meta.outputs.version }}.zip
-          display_name: ${{ env.FILE_DISPLAY_NAME }}
+          display_name: ${{ env.FILE_DISPLAY_NAME }} v${{ steps.meta.outputs.version }}
           category: main
           version: ${{ steps.meta.outputs.version }}
           changelog: ${{ steps.meta.outputs.changelog }}

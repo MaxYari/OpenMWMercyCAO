@@ -55,39 +55,6 @@ I.Settings.registerGroup {
             description = 'Scales every chance of an NPC running off to hide until found out: after turning invisible (rather than repositioning around the player), when retreating (rather than retreating towards friends) and after blinking the player out of sight. 0 disables hiding, higher values make it more likely.',
         },
         {
-            key = 'CasterCustomSpellsChance',
-            renderer = 'number',
-            default = 0.666,
-            argument = {
-                min = 0,
-                max = 1,
-            },
-            name = 'Spellcaster Custom Spells Chance',
-            description = 'A probability (in 0 - 1 range) that a spellcasting NPC gets Mercy\'s custom spells on their first fight.',
-        },
-        {
-            key = 'SpellcasterUpgradeChance',
-            renderer = 'number',
-            default = 0.1,
-            argument = {
-                min = 0,
-                max = 1,
-            },
-            name = 'Non-Caster Custom Spells Chance',
-            description = 'A probability (in 0 - 1 range) that an NPC who knows no spells still gets Mercy\'s custom spells on their first fight, as if they were a spellcaster.',
-        },
-        {
-            key = 'ManaPotionChance',
-            renderer = 'number',
-            default = 0.5,
-            argument = {
-                min = 0,
-                max = 1,
-            },
-            name = 'Mana Potion Chance',
-            description = 'A probability (in 0 - 1 range) that a spellcasting NPC gets a level appropriate Restore Magicka potion on their first fight. They drink it a few seconds after running out of magicka for their spells.',
-        },
-        {
             key = 'ScaredProbModifier',
             renderer = 'number',
             default = 1,
@@ -120,6 +87,57 @@ I.Settings.registerGroup {
             name = 'Companion Mercy Probability',
             description = 'A probability (in 0 - 1 range) that a companion will show mercy to surrendering foes.',
         }
+    },
+}
+
+I.Settings.registerGroup {
+    key = 'SettingsMercyCAOMagic',
+    page = 'MercyCAOPage',
+    l10n = 'MercyCAO',
+    name = 'Magic',
+    order = 4,
+    permanentStorage = true,
+    settings = {
+        {
+            key = 'CasterCustomSpellsChance',
+            renderer = 'number',
+            default = 0.666,
+            argument = {
+                min = 0,
+                max = 1,
+            },
+            name = 'Spellcaster Custom Spells Chance',
+            description = 'A probability (in 0 - 1 range) that a spellcasting NPC gets Mercy\'s custom spells on their first fight.',
+        },
+        {
+            key = 'SpellcasterUpgradeChance',
+            renderer = 'number',
+            default = 0.1,
+            argument = {
+                min = 0,
+                max = 1,
+            },
+            name = 'Non-Caster Custom Spells Chance',
+            description = 'A probability (in 0 - 1 range) that an NPC who knows no spells still gets Mercy\'s custom spells on their first fight, as if they were a spellcaster.',
+        },
+        {
+            key = 'ExtraSpellsForHighLevelCasters',
+            renderer = 'checkbox',
+            default = true,
+            name = 'More Spells For Experienced Spellcasters',
+            description = 'Spellcasters of level 16 and above roll for Mercy\'s custom spells twice, so they usually get more of them.',
+        },
+        {
+            key = 'ManaPotionChance',
+            renderer = 'number',
+            default = 0.5,
+            argument = {
+                min = 0,
+                max = 1,
+            },
+            name = 'Mana Potion Chance',
+            description = 'A probability (in 0 - 1 range), rolled 3 times on a spellcasting NPC\'s first fight, of getting a level appropriate Restore Magicka potion for each success (so up to 3). They drink one a few seconds after running out of magicka for their spells.',
+        },
     },
 }
 

@@ -77,6 +77,7 @@ Furthermore, only 1/3 of those get an "Exotic" spell
 - Install this mod **with a mod organiser**: download the archive (or this repository as an archive) and drag and drop it into your mod organiser of choice (e.g [Mod Organizer 2](https://github.com/ModOrganizer2/modorganizer/releases) on Windows or [Nerevarine Organizer](https://github.com/grazelandsnomad/nerevarine_organizer/releases/tag/v0.70) on Linux). **Or** [read this tutorial](https://modding-openmw.com/tips/installing-mods/) on how to install mods using the launcher or completely manually (it's also very easy).
 - Enable the mod's .omwscripts file in the "Content Files" tab of the OpenMW launcher.
 - Ensure that "Use navigation mesh for pathfinding" is enabled in the "Gameplay" tab of the launcher settings. It's usually enabled by default, but Mercy can't take over NPCs without it, so it never hurts to double-check.
+- Optional: install and enable Lua Physics [TO DO: provide a link] - its only required by a single rare spell that Mercy spellcasters very occasionally can use, its completely safe to not install it, in that case you will wimply not encounter that spell
 
 Note: Previously this mod required a Lua Behaviour Trees 2e dependency; it is not required anymore as it is bundled together with the mod.
 
@@ -86,6 +87,7 @@ Have fun!
 
 ## ☮ Recommended mods
 
+- [Consuming Animated](https://www.nexusmods.com/morrowind/mods/59069) to make it clearer when mages chug a mana potion.
 - [Take Cover](https://www.nexusmods.com/morrowind/mods/54976) by mym - a nice immersion mod that handles enemies fleeing and hiding when they can't reach the player.
 - [One-handed animations and idle fixes](https://www.nexusmods.com/morrowind/mods/55059) by me - makes NPCs look less stupid when they use one-handed weapons (used in the gifs above).
 - [ReAnimation](https://www.nexusmods.com/morrowind/mods/52596) also by me - a good set of first-person animations (if I can say so myself, wink-wink, nudge-nudge) to make the combat feel even more dynamic and less repetitive.

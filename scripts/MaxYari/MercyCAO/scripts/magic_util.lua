@@ -11,7 +11,7 @@ local module = {}
 
 -- Debug logging ---------------------------------------------------------------------------------------------------
 -- Debug logging of Mercy's magic, hiding and detection decisions
-module.DEBUG_LOGGING = true
+module.DEBUG_LOGGING = false
 
 function module.log(...)
     if not module.DEBUG_LOGGING then return end
@@ -185,6 +185,8 @@ module.CUSTOM_SPELL_MISSES_BEFORE_COOLDOWN = 2
 module.EXOTIC_BUNDLE_CHANCE = 0.33
 module.MAGIC_AND_EXOTIC_COMBO_CHANCE = 0.25
 module.AUX_BUNDLE_CHANCE = 0.33
+-- Spellcasters of this level and above roll the normal / exotic spells twice (aux still once)
+module.EXTRA_SPELL_ROLL_LEVEL = 16 -- (when npc.extraSpellRolls, from the settings)
 
 -- Spell definitions live in scripts/spells, one file each (see scripts/spells/init.lua for their fields)
 local mp = "scripts/MaxYari/MercyCAO/"
@@ -227,13 +229,20 @@ function module.isAvailable(key)
 end
 
 -- The spells of a bundle this NPC can get, given what it already picked
+local function isPicked(key, picked)
+    for _, pickedKey in ipairs(picked) do
+        if pickedKey == key then return true end
+    end
+    return false
+end
+
 local function bundleCandidates(bundle, picked, npc)
     local candidates, totalWeight = {}, 0
     for _, key in ipairs(sortedKeys(module.CUSTOM_SPELLS)) do
         local spell = module.CUSTOM_SPELLS[key]
         if spell.bundle == bundle and npc.level >= (spell.minLevel or 0) and module.isForCharacter(key, npc.characterType)
             and module.isAvailable(key)
-            and not isIncompatible(spell, picked) then
+            and not isPicked(key, picked) and not isIncompatible(spell, picked) then
             candidates[#candidates + 1] = key
             totalWeight = totalWeight + spell.weight
         end
@@ -263,17 +272,24 @@ function module.rollCustomSpells(npc)
         module.log("Bundle", bundle, "gave", key or "nothing")
         if key then picked[#picked + 1] = key end
     end
-    local exotic = math.random() < module.EXOTIC_BUNDLE_CHANCE
-    -- No exotic spell this NPC can get (level, caster or ranged limits): a successful exotic roll counts as normal
-    if exotic and #bundleCandidates("exotic", picked, npc) == 0 then
-        module.log("No exotic spells for this NPC, rolling normal instead")
-        exotic = false
+    -- Experienced spellcasters roll the normal / exotic spells twice
+    local rolls = 1
+    if npc.extraSpellRolls and npc.characterType == "Spellcaster" and npc.level >= module.EXTRA_SPELL_ROLL_LEVEL then
+        rolls = 2
     end
-    if math.random() < module.MAGIC_AND_EXOTIC_COMBO_CHANCE then
-        pickFrom("normal")
-        if exotic then pickFrom("exotic") end
-    else
-        pickFrom(exotic and "exotic" or "normal")
+    for _ = 1, rolls do
+        local exotic = math.random() < module.EXOTIC_BUNDLE_CHANCE
+        -- No exotic spell this NPC can get (level, caster or ranged limits, or all picked): the roll counts as normal
+        if exotic and #bundleCandidates("exotic", picked, npc) == 0 then
+            module.log("No exotic spells for this NPC, rolling normal instead")
+            exotic = false
+        end
+        if math.random() < module.MAGIC_AND_EXOTIC_COMBO_CHANCE then
+            pickFrom("normal")
+            if exotic then pickFrom("exotic") end
+        else
+            pickFrom(exotic and "exotic" or "normal")
+        end
     end
     if math.random() < module.AUX_BUNDLE_CHANCE then pickFrom("aux") end
     return picked

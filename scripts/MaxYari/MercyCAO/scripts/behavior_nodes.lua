@@ -55,6 +55,14 @@ local function VanillaBehavior(config)
 
     config.run = function(task, state)
         state.vanillaBehavior = true
+        -- A custom spell is waiting (see PeriodicInterrupt): once the engine's current cast is over, hold the spell
+        -- stance for Mercy instead of letting the engine start another cast or draw a weapon
+        if not task.endsAt and (state.customSpellReservedUntil or 0) > core.getSimulationTime()
+            and types.Actor.getStance(omwself) == types.Actor.STANCE.Spell and not magicUtil.isCasting(omwself) then
+            state.vanillaBehavior = false
+            state.stance = types.Actor.STANCE.Spell
+            return task:running()
+        end
         if task.endsAt then
             if p.endOnStance and state.detStance == p.endOnStance() then
                 -- Still vanilla for this frame, so Mercy doesn't put the stance it picked back
@@ -1152,19 +1160,34 @@ BT.register("SayGroup", SayGroup)
 -- triggered until its child is done. While the condition doesn't hold it's checked again at most every
 -- RECHECK_PERIOD seconds. The timer survives the parent branch restarting, so a branch that restarts often doesn't
 -- reset it.
+-- A condition blocked only by a cast or attack in progress (castBlockTransient, see canCastCustom) is rechecked every
+-- frame for up to RESERVE_TIME instead, and reserves the next opening (state.customSpellReservedUntil): no magic
+-- handover to the engine meanwhile, and a vanilla spell stance is held for Mercy once the current cast ends.
 function PeriodicInterrupt(config)
     local p = config.properties
     local RECHECK_PERIOD = 0.5
+    local RESERVE_TIME = 1.5
     local nextCheckAt = 0
     local lastWaitReason = nil
+    local reservedSince = nil
 
     config.shouldRun = function(task, state)
         if task.started then return true end
         local now = core.getSimulationTime()
         if now < nextCheckAt then return false end
         state.castBlockReason = nil
+        state.castBlockTransient = false
         if not p.condition() then
             nextCheckAt = now + RECHECK_PERIOD
+            if state.castBlockTransient and (not reservedSince or now - reservedSince < RESERVE_TIME) then
+                reservedSince = reservedSince or now
+                state.customSpellReservedUntil = reservedSince + RESERVE_TIME
+                nextCheckAt = now
+            elseif not state.castBlockTransient then
+                -- Blocked for another reason now (range, sight, cooldown...): give the opening back
+                if reservedSince then state.customSpellReservedUntil = nil end
+                reservedSince = nil
+            end
             -- The condition is rechecked often, so only log when the reason it fails changes. Condition helpers like
             -- canCastCustom leave a reason, other parts of the condition don't.
             local reason = state.castBlockReason or "another part of the condition"
@@ -1175,6 +1198,7 @@ function PeriodicInterrupt(config)
             return false
         end
         lastWaitReason = nil
+        reservedSince = nil
         nextCheckAt = now + p.period()
         return true
     end
@@ -1240,6 +1264,25 @@ local CAST_STOP_KEYS = { ["self stop"] = true, ["touch stop"] = true, ["target s
 -- spells, e.g. "levitateBolt"), driving the actor itself: spell stance, selects the
 -- spell, with 'aim' turns and pitches at the enemy leading a moving target, presses use and waits for the cast
 -- animation to finish. The main loop keeps the actor still and in Mercy's hands while state.castingCustom is set.
+-- Back to back custom spells: once MAX_BACK_TO_BACK different ones were cast in a row (each starting within
+-- BACK_TO_BACK_GAP seconds of the previous one's end), no custom spell for REST_TIME seconds. Recasting the same spell
+-- doesn't count, and doesn't break the row.
+local MAX_BACK_TO_BACK = 2
+local BACK_TO_BACK_GAP = 2
+local REST_TIME = 5
+
+-- Debug: how long ago the actor consumed something or started a consuming animation (Consuming Animated), for cast
+-- failures
+local function consumeInfo(state)
+    local now = core.getSimulationTime()
+    local parts = {}
+    if state.consumedAt then parts[#parts + 1] = string.format("consumed %.1f s ago", now - state.consumedAt) end
+    if state.consumeAnimStartedAt then
+        parts[#parts + 1] = string.format("consuming animation %.1f s ago", now - state.consumeAnimStartedAt)
+    end
+    return #parts > 0 and ("(" .. table.concat(parts, ", ") .. ")") or ""
+end
+
 function CastSpell(config)
     local p = config.properties
     local TIMEOUT = 5
@@ -1272,6 +1315,7 @@ function CastSpell(config)
         end
         state.castingCustom = true
         state.magicBusy = true
+        state.customSpellReservedUntil = nil
         types.Actor.setSelectedSpell(omwself, task.spellId)
         magicUtil.log(config.name, "casting", task.spellId, "aim:", task.aim)
     end
@@ -1279,7 +1323,7 @@ function CastSpell(config)
     config.run = function(task, state)
         local now = core.getSimulationTime()
         if now - task.startedAt > TIMEOUT or not state.enemyActor then
-            magicUtil.log(config.name, "gave up in phase", task.phase)
+            magicUtil.log(config.name, "gave up in phase", task.phase, consumeInfo(state))
             return task:fail()
         end
 
@@ -1316,7 +1360,7 @@ function CastSpell(config)
                 task.phase = "cast"
                 magicUtil.log(config.name, "cast animation started:", lastCastKey)
             elseif now - task.pressedAt > 2 then
-                magicUtil.log(config.name, "the cast didn't start after pressing use")
+                magicUtil.log(config.name, "the cast didn't start after pressing use", consumeInfo(state))
                 return task:fail()
             else
                 state.attack = omwself.ATTACK_TYPE.Any
@@ -1340,6 +1384,24 @@ function CastSpell(config)
     end
 
     config.finish = function(task, state)
+        if task.customSpell and task.reported then
+            local now = core.getSimulationTime()
+            local lastEnd, lastKey = state.lastCustomCastEndAt, state.lastCustomCastKey
+            local chain = state.customCastChain or 0
+            if lastEnd and task.startedAt - lastEnd <= BACK_TO_BACK_GAP then
+                if task.customSpell ~= lastKey then chain = chain + 1 end
+            else
+                chain = 1
+            end
+            if chain >= MAX_BACK_TO_BACK then
+                state.customSpellRestUntil = now + REST_TIME
+                magicUtil.log(config.name, chain, "custom spells back to back - resting for", REST_TIME, "s")
+                chain = 0
+            end
+            state.customCastChain = chain
+            state.lastCustomCastEndAt = now
+            state.lastCustomCastKey = task.customSpell
+        end
         state.castingCustom = false
         state.magicBusy = false
         state.pitchTarget = nil
@@ -1389,17 +1451,18 @@ end
 -- Repositioning (enemyInSight) takes the passing spot furthest from the enemy. Hiding takes the best hiding spot: one
 -- the enemy still can't see after stepping aside (probed from points around it), reached around corners rather than in
 -- a straight line, and far from the enemy (see HIDE_WEIGHTS).
--- Sampling is spread over frames: up to 'attempts' samples, at most SAMPLE_BUDGET seconds of work per frame. If no spot
+-- Spots on other floors are fine, up or down any stairs the path takes.
+-- Sampling is spread over frames: up to 'attempts' samples, at most SAMPLE_BUDGET seconds of work per frame and at most
+-- SEARCH_TIME_LIMIT seconds in total, so the actor never stands around searching for long. If no spot
 -- passes, 'fallback' (default true) takes any reachable spot around the actor; otherwise the node fails, and with
 -- 'failCombatState' the actor switches to that combat state.
 -- Random spots only come from navmesh connected to the search center through the allowed areas (Detour searches
 -- polygon links outwards from the center), so disconnected navmesh islands never come up.
 function PickRepositionPoint(config)
     local p = config.properties
-    local MAX_HEIGHT_DIFFERENCE = 150
     local DOOR_NEAR_PATH = 100
-    local SAMPLE_BUDGET = 0.001 -- Seconds of sampling work per frame
-    local MAX_FRAMES = 30       -- Gives up on remaining samples after this many frames
+    local SAMPLE_BUDGET = 0.002   -- Seconds of sampling work per frame
+    local SEARCH_TIME_LIMIT = 0.5 -- Seconds (game time) the whole search may take
     local HIDE_PROBE_OFFSET = 200 -- Concealment probes: the enemy's eyes moved this far to its sides and towards the spot
     local HIDE_WEIGHTS = { concealment = 0.5, corners = 0.25, distance = 0.25 }
 
@@ -1486,6 +1549,7 @@ function PickRepositionPoint(config)
             toSelfFlat = toSelfFlat:normalize(),
             samples = 0,
             frames = 0,
+            startedAt = core.getSimulationTime(),
             time = 0,
             best = nil,
             bestScore = -math.huge,
@@ -1505,7 +1569,6 @@ function PickRepositionPoint(config)
         local toPointFlat = util.vector2(toPoint.x, toPoint.y)
         local enemyDistance = toPointFlat:length()
         if distance < search.minDistance or distance > search.maxDistance then return nil, "distance" end
-        if math.abs(fromCenter.z) > MAX_HEIGHT_DIFFERENCE then return nil, "other floor" end
         if search.minAngle > 0 and toPointFlat:normalize():dot(search.toSelfFlat) > search.maxAngleCos then
             return nil, "not around the enemy"
         end
@@ -1590,7 +1653,9 @@ function PickRepositionPoint(config)
         until search.samples >= search.attempts or core.getRealTime() - frameStart >= SAMPLE_BUDGET
         search.time = search.time + (core.getRealTime() - frameStart)
 
-        if search.samples >= search.attempts or search.frames >= MAX_FRAMES then return finish(task, state) end
+        if search.samples >= search.attempts or core.getSimulationTime() - search.startedAt >= SEARCH_TIME_LIMIT then
+            return finish(task, state)
+        end
         task:running()
     end
 
