@@ -1,0 +1,135 @@
+[size=6][b]☮ Mercy: Combat AI Overhaul[/b][/size]
+
+[img]https://raw.githubusercontent.com/MaxYari/OpenMWMercyCAO/main/imgs/banner_big.png[/img]
+
+A significant overhaul of in-combat NPC behavior for OpenMW. Using a custom Lua behavior trees library, with new voice lines and animations. Complete overhauls melee NPCs and partially overhauls spellcasters and marksmen.
+
+The combat doesnt always need to end in bloodshed, but when it does - it does so in [i]style[/i].
+
+NPCs are now capable of more than chasing and stabbing. They will move around, run, walk, execute series of attacks, and use quick and charged attacks interchangeably. They might be cautious to engage or even not willing to fight anymore. Those with spellcasting ability sometimes will use a wider array of spells appropriately (such as invisibility) or even, very occasionally, use few of the very exotic special spells (quite rare, still vanilla friendly, but might be with a dash of humour, you will have to trust my sense of humour here).
+
+The overall goal of the mod is to make the combat more engaging and entartainment as well as introduce some occasional memorable encounters that feel "different" (but not immersion-breaking).
+
+Many new ElevenLabs-generated combat voice lines by [url=https://next.nexusmods.com/profile/vonwolfe]vonwolfe[/url], currently for Dunmer, Nord and Orc (male and female) and Imperial (male) NPCs. Can be easily turned off in settings if AI slop voices grind your gears (understandably, I like them though).
+
+[url=https://ko-fi.com/maxyari][img]https://raw.githubusercontent.com/MaxYari/OpenMWMercyCAO/main/imgs/head_like_a_hole_banner_left_half_bright148.webp[/img][/url][url=https://ko-fi.com/maxyari][img]https://raw.githubusercontent.com/MaxYari/OpenMWMercyCAO/main/imgs/nexus/banner_right.png[/img][/url]
+[url=https://ko-fi.com/maxyari][img]https://raw.githubusercontent.com/MaxYari/OpenMWMercyCAO/main/imgs/nexus/banner_glow.png[/img][/url]
+
+[size=6][b]☮ Demos and Details[/b][/size]
+
+[img]https://raw.githubusercontent.com/MaxYari/OpenMWMercyCAO/main/imgs/demo1.gif[/img] [img]https://raw.githubusercontent.com/MaxYari/OpenMWMercyCAO/main/imgs/demo2.gif[/img] [img]https://raw.githubusercontent.com/MaxYari/OpenMWMercyCAO/main/imgs/demo3.gif[/img]
+
+The gifs above show some of the new behaviours.
+
+Now below are lists of behaviours and spells that Mercy adds, I personally consider those to be spoilers and would STRONGLY recommend to just play it and have some sense of wonder. But if you hate surprises read under the spoilers below.
+
+[b]Full(ish) list of behaviours[/b]
+[spoiler]
+
+Most of them have some amount of randomisation, so different NPCs might behave slightly (or significantly) differently.
+
+Chances of these behaviours can be increased/decreased in the mod's settings page: Options -> Scripts -> Mercy: CAO.
+
+[list]
+[*]Hitting an NPC alerts their friends nearby, the ones who can see it will join the fight.
+[*]NPCs might be unwilling to engage and warn you not to come closer instead (depends on how aggressive they are and how much they like you). Come too close or attack them and they fight. If they lose sight of you - they might come looking where they last saw you, and eventually give up. Guards never hesitate.
+[*]When unwilling to engage they migh go and investigate after loosing a sight of you, or even attempt to sneak up on you.
+[*]Chase, fall back, strafe around in combat, walk menacingly. Rare NPCs will jump around or run around you at full speed.
+[*]Chain attacks together, the max amount of attacks in a chain depends on their weapon skill.
+[*]Make mistakes in picking the best attack type, more mistakes at lower weapon skill.
+[*]Some might get angry when you keep hitting them fast and respond with a war cry and a similar quick attack spam.
+[*]At low health (below 33%, adjustable in the settings) every hit has a chance of scaring them. A scared NPC will either run away looking for friends, or ask for mercy - giving up all the items they carry (except the clothing/armor they wear) and leaving the fight. Guards never surrender, and NPCs don't surrender to creatures.
+[*]Your companions will usually spare enemies asking for mercy.
+[*]NPCs might retreat from an invisible enemy.
+[*]When casting special mercy spells that hinder you in some way - might chose to run away and hide.
+[*]Probably other smaller things that I forgot about.
+[/list]
+
+[/spoiler]
+
+[b]Full(ish) list of extra NPC spells[/b]
+[spoiler]
+
+2/3 of vanilla casters get 1-2 Mercy spells Furthermore, only 1/3 of those get an "Exotic" spell
+
+[list]
+[*]Blindness on target (not 100% magnitude but close to it)
+[*](Exotic) Blink - teleports the target to a random (reachable)
+[*]Chameleon 50% on self
+[*](Exotic) Confusion on player - flips your keyboard controls
+[*]Invisibility on self - for repositioning or to run away and hide
+[*]Levitation bolt - 1pt levitation and speed debuff on player
+[*]Light - light on self with a minor agility buff
+[*](Exotic) Pillow fight - shoots out a cone of pillows (yes you heard that right, it looks as great as it sounds, trust me), physical damage, requires Lua Physics to be installed
+[*](Exotic) Skeleton jail - a projectile that spawns 4 skeletons around the target if it hits. Skeletons are very shortlived.
+[*]Speed boost on self
+[/list]
+
+[/spoiler]
+
+[size=5][b]☮ How to install[/b][/size]
+
+[list]
+[*][b]Requires OpenMW 0.49 or newer.[/b]
+[*]Install and enable [url=https://www.nexusmods.com/morrowind/mods/60256]Max Yari's Script Services (MSS)[/url], it's a required dependency.
+[*]Install this mod [b]with a mod organiser[/b]: download the archive (or this repository as an archive) and drag and drop it into your mod organiser of choice (e.g [url=https://github.com/ModOrganizer2/modorganizer/releases]Mod Organizer 2[/url] on Windows or [url=https://github.com/grazelandsnomad/nerevarine_organizer/releases/tag/v0.70]Nerevarine Organizer[/url] on Linux). [b]Or[/b] [url=https://modding-openmw.com/tips/installing-mods/]read this tutorial[/url] on how to install mods using the launcher or completely manually (it's also very easy).
+[*]Enable the mod's .omwscripts file in the "Content Files" tab of the OpenMW launcher.
+[*]Ensure that "Use navigation mesh for pathfinding" is enabled in the "Gameplay" tab of the launcher settings. It's usually enabled by default, but Mercy can't take over NPCs without it, so it never hurts to double-check.
+[/list]
+
+Note: Previously this mod required a Lua Behaviour Trees 2e dependency; it is not required anymore as it is bundled together with the mod.
+
+Note: The compatibility patches script file (present in old versions of Mercy) was removed on purpose, it's not needed anymore.
+
+Have fun!
+
+[size=5][b]☮ Recommended mods[/b][/size]
+
+[list]
+[*][url=https://www.nexusmods.com/morrowind/mods/54976]Take Cover[/url] by mym - a nice immersion mod that handles enemies fleeing and hiding when they can't reach the player.
+[*][url=https://www.nexusmods.com/morrowind/mods/55059]One-handed animations and idle fixes[/url] by me - makes NPCs look less stupid when they use one-handed weapons (used in the gifs above).
+[*][url=https://www.nexusmods.com/morrowind/mods/52596]ReAnimation[/url] also by me - a good set of first-person animations (if I can say so myself, wink-wink, nudge-nudge) to make the combat feel even more dynamic and less repetitive.
+[/list]
+
+[size=5][b]☮ Credit[/b][/size]
+
+ElevenLabs-generated voice lines by [url=https://next.nexusmods.com/profile/vonwolfe]vonwolfe[/url].
+
+My thanks also goes to the OpenMW Discord community for massively helping me overcome a multitude of Lua hurdles, testing, and providing feedback.
+
+[size=5][b]☮ Mod compatibility[/b][/size]
+
+Not compatible with most mods directly affecting NPC behavior in combat, unless a mod specifically used Mercy interface to add compatibility.
+
+Mods by [url=https://next.nexusmods.com/profile/mym]mym[/url] are compatible.
+
+[size=5][b]☮ For developers[/b][/size]
+
+Mercy provides an extension interface for developing new NPC behaviours that get injected alongside Mercy's own (patches for other mods can be made the same way), an interface to take Mercy out of the way for specific NPCs, and a config system to blacklist specific NPCs or whole cells from Mercy or from surrendering, and to keep specific items from being dropped by surrendering NPCs. Mercy's behaviour trees live in [font=Courier New]OpenMW AI.b3[/font], which you can open in the [url=https://github.com/MaxYari/behavior3editorplus]Behavior3+ editor[/url].
+
+All of it is documented in the [url=https://github.com/MaxYari/OpenMWMercyCAO#adding-mercy-compatibility-to-your-mod]git repository[/url]. If you are already reading this on git - just read below.
+
+[size=5][b]☮ MWSE compatibility[/b][/size]
+
+This is an OpenMW Lua mod, it's not compatible with MWSE. It's probably possible to port it since most of the mod is pure Lua, but I'm not familiar with MWSE and am not planning to change that. If you'd like to port it - feel free to do so. If possible please keep this mod as a dependency.
+
+[size=5][b]☮ FAQ[/b][/size]
+
+[list]
+[*][b]Generative AI is evil![/b]
+No it's not, and also this is not a question.
+[*][b]Is this compatible with mod X?[/b]
+I don't know anything beyond what I described above in the compatibility section. You can always try it and report.
+[*][b]Can I get a version for an older OpenMW?[/b]
+No, Mercy relies on Lua functions that older versions don't have. You can keep a separate, newer OpenMW install, you don't need to overwrite anything nor reinstall your mods.
+[*][b]I encountered terrible awful bugs![/b]
+Sweet! Feel free to report it. But first, check the F10 console and see if there are any red errors. Red errors are good, it's useful information. If there are some - also grab a log file and share it (it's in Documents/My Games/OpenMW/openmw.log). I can not guarantee that I will fix anything anytime soon, so your best bet might be finding the conflicting mod on your own and turning it off (although this should be pretty rare). If you did find a conflicting mod - please write about it in the posts tab on Nexus.
+[*][b]Modding/extension documentation is bad, I don't understand it![/b]
+Well, I did my best with it. Experiment and read Mercy's code, I'm sure it's not that difficult to figure out if you really want to extend Mercy.
+[*][b]Do I need to have Mercy as a dependency if I want to make my own behaviour tree mod?[/b]
+No, of course not, you don't need Mercy to use the [url=https://github.com/MaxYari/behaviourtreelua2e]behaviour tree Lua library[/url] or the visual editor in your projects!
+[/list]
+
+[size=5][b]☮ Generative AI use disclaimer[/b][/size]
+
+As mentioned before - Eleven Labs was used to generate new voice lines. ChatGPT was used as a coding and writing assistant.
