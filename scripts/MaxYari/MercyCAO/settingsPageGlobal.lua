@@ -136,7 +136,18 @@ I.Settings.registerGroup {
                 max = 1,
             },
             name = 'Mana Potion Chance',
-            description = 'A probability (in 0 - 1 range), rolled 3 times on a spellcasting NPC\'s first fight, of getting a level appropriate Restore Magicka potion for each success (so up to 3). They drink one a few seconds after running out of magicka for their spells.',
+            description = 'A probability (in 0 - 1 range) of a spellcaster NPC receiving a level appropriate Restore Magicka potion for each success (up to 3 potions). They are only allowed to chug them at most once in 10 seconds.',
+        },
+        {
+            key = 'ManaPotionLootChance',
+            renderer = 'number',
+            default = 0,
+            argument = {
+                min = 0,
+                max = 1,
+            },
+            name = 'Mana Potion Loot Chance',
+            description = 'The probability (0 - 1 range) that someone of the extra mana potions from the setting above will be lootable from the body.',
         },
     },
 }

@@ -619,6 +619,8 @@ local nonCasterCustomSpellsChance = magicSettings:get("SpellcasterUpgradeChance"
 local extraSpellsForHighLevelCasters = magicSettings:get("ExtraSpellsForHighLevelCasters") ~= false
 -- Share of spellcasters that get a magicka potion on their first fight
 local manaPotionChance = magicSettings:get("ManaPotionChance") or 0
+local manaPotionLootChance = magicSettings:get("ManaPotionLootChance") or 0
+
 CanGoHamProb = 0.5
 BaseFriendFightVal = 80
 AvengeShoutProb = 0.5
@@ -1598,7 +1600,7 @@ local eventHandlers = {
    Mercy_CombatStateChanged = onEnemyCombatStateChanged,
    -- Mana potions Mercy kept for this caster go into its inventory, to be looted
    Died = function()
-      manaPotions.onDied(omwself.object)
+      manaPotions.onDied(omwself.object, manaPotionLootChance)
    end,
    -- Testing: custom spells from the player's "luamercy" console command. Given to this actor right away, or with 'next'
    -- kept until it starts a fight as a spellcaster. 'cancel' drops a 'next' request another actor already took.

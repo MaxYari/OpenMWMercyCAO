@@ -133,10 +133,12 @@ function module.combatUpdate(actor, now)
 end
 
 -- When the caster dies: the potions it didn't drink go into its inventory, to be looted
-function module.onDied(actor)
+function module.onDied(actor, manaPotionLootChance)
     if potionsLeft <= 0 or not potionId then return end
-    log("died with", potionsLeft, "x", potionId, "- putting them in the inventory")
-    core.sendGlobalEvent(GIVE_EVENT, { actor = actor, potionId = potionId, count = potionsLeft })
+    if math.random() <= manaPotionLootChance then
+        log("died with", potionsLeft, "x", potionId, "- putting them in the inventory")
+        core.sendGlobalEvent(GIVE_EVENT, { actor = actor, potionId = potionId, count = potionsLeft })
+    end    
     potionsLeft = 0
 end
 
