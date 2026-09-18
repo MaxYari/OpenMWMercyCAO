@@ -600,14 +600,6 @@ local interface = {
    Events = Events
 }
 
-interface.setEnabled = function(state)
-   interface.enabled = state
-end
-
-
-
-
-
 
 
 -- Main Logic -----------------------------------------------------
@@ -742,12 +734,17 @@ local enableAI = function (state)
    if not aiEnabled == state then
       aiEnabled = state
       omwself:enableAI(state)
-      -- Vanilla AI never touches sneak, so don't hand back an NPC that's still sneaking
+      -- Clear sneak flag upon handing back the control to vanilla AI
       if state and sneakControlSet then
          omwself.controls.sneak = false
          sneakControlSet = false
       end
    end
+end
+
+interface.setEnabled = function(state)
+   interface.enabled = state
+   enableAI(state)
 end
 
 local lastFleeValue = selfActor:aiFleeStat().modified
