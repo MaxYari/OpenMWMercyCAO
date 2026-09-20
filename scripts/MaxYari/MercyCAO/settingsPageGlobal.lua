@@ -107,7 +107,7 @@ I.Settings.registerGroup {
                 max = 1,
             },
             name = 'Spellcaster Custom Spells Chance',
-            description = 'A probability (in 0 - 1 range) that a spellcasting NPC gets Mercy\'s custom spells on their first fight.',
+            description = 'A probability (in 0 - 1 range) that a spellcasting NPC gets Mercy\'s custom spell.',
         },
         {
             key = 'SpellcasterUpgradeChance',
@@ -118,14 +118,14 @@ I.Settings.registerGroup {
                 max = 1,
             },
             name = 'Non-Caster Custom Spells Chance',
-            description = 'A probability (in 0 - 1 range) that an NPC who knows no spells still gets Mercy\'s custom spells on their first fight, as if they were a spellcaster.',
+            description = 'A probability (in 0 - 1 range) that an NPC who knows no spells still gets Mercy\'s custom spell.',
         },
         {
             key = 'ExtraSpellsForHighLevelCasters',
             renderer = 'checkbox',
-            default = true,
+            default = false,
             name = 'More Spells For Experienced Spellcasters',
-            description = 'Spellcasters of level 16 and above roll for Mercy\'s custom spells twice, so they usually get more of them.',
+            description = 'Spellcasters of level 16 and above roll for Mercy\'s custom spells twice, so they get more of them.',
         },
         {
             key = 'ManaPotionChance',
