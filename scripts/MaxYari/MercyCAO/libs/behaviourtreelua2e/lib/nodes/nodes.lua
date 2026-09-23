@@ -147,7 +147,9 @@ local function Cooldown(config)
 
     config.finish = function(task, state)
         -- Rejecting is also finished, so this will be forever locked
-        if task.gotThrough and p.hotWhileRunning() then
+        -- An abort isn't a completed run: restarting the cooldown from there let anything that interrupts the branch
+        -- (an interrupt decorator firing) lock it out again and again, so the branch could never finish.
+        if task.gotThrough and not task.aborted and p.hotWhileRunning() then
             lastUseTime = timer()
         end
     end

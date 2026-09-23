@@ -5,13 +5,13 @@ local CHARACTER = require("scripts/MaxYari/MercyCAO/scripts/enums").CHARACTER_TY
 
 return {
     key = "levitateBolt",
-    version = 6,
+    version = 7,
     bundle = "exotic",
     minLevel = 8,
     character_type = { CHARACTER.Spellcaster, CHARACTER.Marksman },
     weight = 1,
     prewarm = 1,
-    cooldown = 10,
+    cooldown = 20,
     record = {
         name = "Hex of Floating",
         type = core.magic.SPELL_TYPE.Spell,

@@ -6,13 +6,13 @@ local CHARACTER = require("scripts/MaxYari/MercyCAO/scripts/enums").CHARACTER_TY
 
 return {
     key = "blindness",
-    version = 1,
+    version = 2,
     bundle = "normal",
     minLevel = 8,
     character_type = { CHARACTER.Spellcaster, CHARACTER.Marksman },
     weight = 1,
-    prewarm = 1,
-    cooldown = 10,
+    prewarm = 3,
+    cooldown = 20,
     record = {
         name = "Veil of Darkness",
         type = core.magic.SPELL_TYPE.Spell,
@@ -20,7 +20,7 @@ return {
         alwaysSucceedFlag = true,
         isAutocalc = false,
         effects = {
-            { id = "blind", range = RANGE.Target, area = 0, duration = 10, magnitudeMin = 80, magnitudeMax = 80 },
+            { id = "blind", range = RANGE.Target, area = 0, duration = 6, magnitudeMin = 85, magnitudeMax = 85 },
         },
     },
 }

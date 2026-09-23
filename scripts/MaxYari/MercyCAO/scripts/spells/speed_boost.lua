@@ -5,7 +5,7 @@ local CHARACTER = require("scripts/MaxYari/MercyCAO/scripts/enums").CHARACTER_TY
 
 return {
     key = "speedBoost",
-    version = 2,
+    version = 3,
     bundle = "aux",
     minLevel = 8,
     character_type = CHARACTER.All,

@@ -34,6 +34,17 @@ I.Settings.registerGroup {
             description = 'Higher values make NPC more likely to hesitate and warn the player before engaging in combat.',
         },
         {
+            key = 'CombatIntensity',
+            renderer = 'number',
+            default = 1,
+            argument = {
+                min = 0.1,
+                max = 10,
+            },
+            name = 'Combat Intensity',
+            description = 'How hard NPCs press an attack. Above 1 they pause and hang back less, close the distance more and attack more often; below 1 they are more careful. 1 is the default balance. Takes effect on a save reload.',
+        },
+        {
             key = 'InvestigateProb',
             renderer = 'number',
             default = 0.4,

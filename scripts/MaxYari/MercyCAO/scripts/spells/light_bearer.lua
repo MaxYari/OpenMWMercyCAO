@@ -6,13 +6,13 @@ local CHARACTER = require("scripts/MaxYari/MercyCAO/scripts/enums").CHARACTER_TY
 
 return {
     key = "lightBearer",
-    version = 2,
+    version = 3,
     bundle = "aux",
     minLevel = 3,
     character_type = { CHARACTER.Spellcaster },
     weight = 0.5,
     prewarm = 0,
-    cooldown = 33,
+    cooldown = 35,
     incompatibleWith = { "invisibility" },
     record = {
         name = "Light Bearer",

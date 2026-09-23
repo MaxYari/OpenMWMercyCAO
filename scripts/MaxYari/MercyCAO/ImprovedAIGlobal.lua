@@ -7,6 +7,7 @@ local manaPotions = require(mp .. "scripts/mana_potions")
 
 local core = require("openmw.core")
 local types = require("openmw.types")
+local I = require("openmw.interfaces")
 local vfs = require('openmw.vfs')
 local markup = require("openmw.markup")
 local world = require("openmw.world")
@@ -94,6 +95,24 @@ blacklist = loadBlacklists()
 local customSpells = {}        -- key -> spell record id
 local customSpellVersions = {} -- key -> version of the definition the record was created from
 
+-- Mercy's spells are Mercy's to cast: OSSC (Oblivion-Style Spell Casting) is told never to pick them for its own
+-- quick-casts. Its filter is global, saved with the game and broadcast to every caster it manages, and an explicit
+-- castSpellAtTarget still works - which is exactly how Mercy casts them when OSSC is installed.
+local osscIgnored = {}
+local function ignoreInOSSC()
+    local osscCasters = I.OSSC_Casters
+    if not osscCasters or type(osscCasters.ignoreSpell) ~= "function" then return end
+    for key, id in pairs(customSpells) do
+        if id and osscIgnored[key] ~= id then
+            osscCasters.ignoreSpell(id)
+            -- The record is recreated when a definition's version changes, so the old id can go back to OSSC
+            if osscIgnored[key] and osscCasters.unignoreSpell then osscCasters.unignoreSpell(osscIgnored[key]) end
+            osscIgnored[key] = id
+            magicUtil.log("OSSC told to ignore", key, id)
+        end
+    end
+end
+
 local function ensureCustomSpells()
     for key, definition in pairs(magicUtil.CUSTOM_SPELLS) do
         local id = customSpells[key]
@@ -104,6 +123,7 @@ local function ensureCustomSpells()
             magicUtil.log("Created custom spell", key, "version", definition.version, record.id)
         end
     end
+    ignoreInOSSC()
 end
 
 -- Custom spells' own global side (event handlers, updates, save data), from their files in scripts/spells

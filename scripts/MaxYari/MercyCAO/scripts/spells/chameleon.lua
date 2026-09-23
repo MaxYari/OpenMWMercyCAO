@@ -5,13 +5,13 @@ local CHARACTER = require("scripts/MaxYari/MercyCAO/scripts/enums").CHARACTER_TY
 
 return {
     key = "chameleon",
-    version = 2,
+    version = 3,
     bundle = "normal",
     minLevel = 3,
     character_type = CHARACTER.All,
     weight = 1,
     prewarm = 0,
-    cooldown = 35,
+    cooldown = 40,
     record = {
         name = "Fade",
         type = core.magic.SPELL_TYPE.Spell,

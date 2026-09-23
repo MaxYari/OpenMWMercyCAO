@@ -17,12 +17,12 @@ local SUMMON_EVENT = "Mercy_SkeletonJail_Summon"
 
 local spell = {
     key = "skeletonJail",
-    version = 5,
+    version = 6,
     bundle = "exotic",
     minLevel = 8,
     character_type = { CHARACTER.Spellcaster },
     weight = 1,
-    cooldown = 15,
+    cooldown = 20,
     record = {
         name = "Skeleton Jail",
         type = core.magic.SPELL_TYPE.Spell,

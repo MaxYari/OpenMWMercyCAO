@@ -15,7 +15,7 @@ local TELEPORT_SOUND = "mysticism hit"
 
 local spell = {
     key = "blink",
-    version = 2,
+    version = 3,
     bundle = "exotic",
     minLevel = 8,
     character_type = { CHARACTER.Spellcaster },

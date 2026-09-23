@@ -9,7 +9,7 @@ local WATCH_START_TIMEOUT = 2 -- Seconds to wait for the effect to show up after
 
 local spell = {
     key = "invisibility",
-    version = 3,
+    version = 4,
     bundle = "normal",
     minLevel = 8,
     character_type = CHARACTER.All,

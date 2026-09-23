@@ -39,8 +39,17 @@ local magicUtil = require(mp .. "scripts/magic_util")
 -- Custom behaviours ------------------
 ---------------------------------------
 
--- Hands the actor to the engine's AI. Runs forever by default. With 'duration' it ends after that many seconds, and
--- with 'endOnStance' (e.g. "Spell") it ends as soon as the engine puts the actor in that stance.
+-- The engine is in the middle of something that taking the controls back would break: a swing or bow draw (wound up
+-- or releasing), a stagger, or a spell cast.
+local function engineBusy(state)
+    return state.attackState ~= enums.ATTACK_STATE.NO_STATE or state.staggerGroup ~= nil or magicUtil.isCasting(omwself)
+end
+
+-- Hands the actor to the engine. Without a duration: for as long as the node runs. With one: a window of that many
+-- seconds, which only closes once the engine isn't busy (see engineBusy), so control is never taken back mid-swing.
+-- With 'endOnStance' (e.g. "Spell") the window also ends as soon as the engine puts the actor in that stance.
+-- The frame a window closes is still vanilla: whatever runs next takes over deliberately, and if nothing does, a loop
+-- around this node starts the next window in the same frame.
 local function VanillaBehavior(config)
     local p = config.properties
 
@@ -49,29 +58,17 @@ local function VanillaBehavior(config)
         task.endsAt = nil
         if p.duration then
             task.endsAt = core.getSimulationTime() + p.duration()
-            magicUtil.log(config.name, "handing over to the engine for", p.duration(), "s")
         end
     end
 
     config.run = function(task, state)
         state.vanillaBehavior = true
-        -- A custom spell is waiting (see PeriodicInterrupt): once the engine's current cast is over, hold the spell
-        -- stance for Mercy instead of letting the engine start another cast or draw a weapon
-        if not task.endsAt and (state.customSpellReservedUntil or 0) > core.getSimulationTime()
-            and types.Actor.getStance(omwself) == types.Actor.STANCE.Spell and not magicUtil.isCasting(omwself) then
-            state.vanillaBehavior = false
-            state.stance = types.Actor.STANCE.Spell
-            return task:running()
-        end
         if task.endsAt then
             if p.endOnStance and state.detStance == p.endOnStance() then
-                -- Still vanilla for this frame, so Mercy doesn't put the stance it picked back
                 magicUtil.log(config.name, "the engine switched to", state.detStance, "stance")
                 return task:success()
             end
-            if core.getSimulationTime() >= task.endsAt then
-                magicUtil.log(config.name, "window over, the engine kept", state.detStance, "stance")
-                state.vanillaBehavior = false
+            if core.getSimulationTime() >= task.endsAt and not engineBusy(state) then
                 return task:success()
             end
         end
@@ -89,8 +86,9 @@ local function ContinuousCondition(config)
 
     config.shouldRun = function(task, state)
         if not task.started then return false end
-        -- Only interrupt itself, and only when condition is false
-        return config.condition(task, state)
+        -- Only interrupt itself, and only when condition is false. Not while Mercy casts one of its spells from inside
+        -- this branch: the cast switches the actor to Spell stance itself, and bailing out on that would abort the cast.
+        return config.condition(task, state) or state.castingCustom
     end
 
     config.start = function(task, state)
@@ -1156,66 +1154,45 @@ end
 BT.register("SayGroup", SayGroup)
 
 
--- Triggers every 'period' seconds when 'condition' holds, then stays
--- triggered until its child is done. While the condition doesn't hold it's checked again at most every
--- RECHECK_PERIOD seconds. The timer survives the parent branch restarting, so a branch that restarts often doesn't
--- reset it.
--- A condition blocked only by a cast or attack in progress (castBlockTransient, see canCastCustom) is rechecked every
--- frame for up to RESERVE_TIME instead, and reserves the next opening (state.customSpellReservedUntil): no magic
--- handover to the engine meanwhile, and a vanilla spell stance is held for Mercy once the current cast ends.
-function PeriodicInterrupt(config)
+-- Lets its child run at most every 'period' seconds, and only when 'condition' holds; fails right away otherwise. A
+-- regular decorator, not an interrupt: it only gets a say when the tree reaches it, so whatever the tree was doing
+-- before it (an attack burst) is always finished first.
+-- While the condition doesn't hold it's checked again at most every RECHECK_PERIOD seconds, which keeps conditions
+-- with raycasts in them (line of sight) cheap on a tree that passes by here many times a second.
+-- The timer is kept in state by node title, so it survives the branch restarting and is shared by every copy of the
+-- node (the Spells subtree is embedded in several places).
+local PERIODIC_RECHECK_PERIOD = 0.5
+function PeriodicCondition(config)
     local p = config.properties
-    local RECHECK_PERIOD = 0.5
-    local RESERVE_TIME = 1.5
-    local nextCheckAt = 0
     local lastWaitReason = nil
-    local reservedSince = nil
 
-    config.shouldRun = function(task, state)
-        if task.started then return true end
+    config.start = function(task, state)
         local now = core.getSimulationTime()
-        if now < nextCheckAt then return false end
+        local dueAt = state.periodicDueAt
+        if now < (dueAt[config.name] or 0) then return task:fail() end
+
         state.castBlockReason = nil
-        state.castBlockTransient = false
         if not p.condition() then
-            nextCheckAt = now + RECHECK_PERIOD
-            if state.castBlockTransient and (not reservedSince or now - reservedSince < RESERVE_TIME) then
-                reservedSince = reservedSince or now
-                state.customSpellReservedUntil = reservedSince + RESERVE_TIME
-                nextCheckAt = now
-            elseif not state.castBlockTransient then
-                -- Blocked for another reason now (range, sight, cooldown...): give the opening back
-                if reservedSince then state.customSpellReservedUntil = nil end
-                reservedSince = nil
-            end
-            -- The condition is rechecked often, so only log when the reason it fails changes. Condition helpers like
-            -- canCastCustom leave a reason, other parts of the condition don't.
+            dueAt[config.name] = now + PERIODIC_RECHECK_PERIOD
+            -- Only log when the reason it fails changes. Condition helpers like canCastCustom leave a reason, other
+            -- parts of the condition don't.
             local reason = state.castBlockReason or "another part of the condition"
             if reason ~= lastWaitReason then
                 magicUtil.log(config.name, "is due, waiting:", reason)
                 lastWaitReason = reason
             end
-            return false
+            return task:fail()
         end
-        lastWaitReason = nil
-        reservedSince = nil
-        nextCheckAt = now + p.period()
-        return true
-    end
 
-    config.start = function(task, state)
-        task.started = true
+        lastWaitReason = nil
+        dueAt[config.name] = now + p.period()
         magicUtil.log(config.name, "triggered")
     end
 
-    config.finish = function(task, state)
-        task.started = false
-    end
-
-    return BT.InterruptDecorator:new(config)
+    return BT.Decorator:new(config)
 end
 
-BT.register("PeriodicInterrupt", PeriodicInterrupt)
+BT.register("PeriodicCondition", PeriodicCondition)
 
 
 local fTargetSpellMaxSpeed = core.getGMST("fTargetSpellMaxSpeed")
@@ -1283,17 +1260,38 @@ local function consumeInfo(state)
     return #parts > 0 and ("(" .. table.concat(parts, ", ") .. ")") or ""
 end
 
+-- OSSC's own quick-cast animation, played for the tell when Mercy casts through OSSC (its castSpellAtTarget launches
+-- the spell without one). Silently does nothing when the animation isn't there, e.g. OSSC isn't installed.
+local OSSC_CAST_GROUP = "quickcast"
+local function playOSSCCastAnimation()
+    if not animation.hasGroup(omwself, OSSC_CAST_GROUP) then return end
+    animManager.Animation:play(OSSC_CAST_GROUP, {
+        priority = animation.PRIORITY.Weapon,
+        blendMask = animation.BLEND_MASK.UpperBody,
+        autoDisable = true,
+    })
+end
+
+-- The last spellcast text key, and whether the spell has left the caster's hands (a bolt is flying, a self spell is
+-- applied). One handler for every CastSpell node: the Spells subtree is embedded in several places, and only one cast
+-- runs at a time anyway (magicBusy).
+local lastCastKey = nil
+local castReleased = false
+I.AnimationController.addTextKeyHandler("spellcast", function(groupname, key)
+    lastCastKey = key
+    if CAST_RELEASE_KEYS[key] then castReleased = true end
+end)
+
 function CastSpell(config)
     local p = config.properties
     local TIMEOUT = 5
     local AIM_TOLERANCE = 0.08 -- radians
-
-    local lastCastKey = nil
-    local castReleased = false -- The spell left the caster's hands: a bolt is flying, a self spell is applied
-    I.AnimationController.addTextKeyHandler("spellcast", function(groupname, key)
-        lastCastKey = key
-        if CAST_RELEASE_KEYS[key] then castReleased = true end
-    end)
+    -- Aiming steers the actor with a proportional controller, which always lags a moving target: against a strafing
+    -- enemy the error settles at (its angular speed / AIM_TURN_RATE) and can never reach AIM_TOLERANCE. So aiming gets
+    -- a hard deadline - past it the spell is cast at whatever the aim is by then, and a miss is just a miss (see
+    -- checkCustomSpellHits). Standing still waiting for a perfect line was worse.
+    local AIM_TIMEOUT = 1.0
+    local AIM_TURN_RATE = 12 -- Share of the remaining turn per second (the main loop's default is 3)
 
     config.start = function(task, state)
         task.customSpell = p.customSpell and p.customSpell()
@@ -1315,7 +1313,25 @@ function CastSpell(config)
         end
         state.castingCustom = true
         state.magicBusy = true
-        state.customSpellReservedUntil = nil
+
+        -- With OSSC installed Mercy only ever casts through it: OSSC casts out of any stance and aims itself, so none
+        -- of the stance switch, aiming and use press below happens and the actor never raises its hands. The
+        -- quick-cast animation is played for the tell, but the spell is already away. If OSSC turns the cast down,
+        -- the node just fails and the spell is tried again on a later pass. No falling back to the stance cast: OSSC
+        -- strips the spells from the actor's list, so that ended with raised hands and nothing to cast.
+        if magicUtil.osscInstalled() then
+            local ok, reason = magicUtil.osscCast(task.spellId, state.enemyActor)
+            if not ok then
+                magicUtil.log(config.name, "OSSC refused the cast:", tostring(reason))
+                return task:fail()
+            end
+            magicUtil.log(config.name, "cast", task.spellId, "through OSSC")
+            task.reported = true
+            playOSSCCastAnimation()
+            if task.customSpell then state:onCustomSpellCast(task.customSpell, state.enemyActor) end
+            return task:success()
+        end
+
         types.Actor.setSelectedSpell(omwself, task.spellId)
         magicUtil.log(config.name, "casting", task.spellId, "aim:", task.aim)
     end
@@ -1335,10 +1351,17 @@ function CastSpell(config)
             local aimDir = spellAimDirection(task, state)
             state.aimDirection = util.vector3(aimDir.x, aimDir.y, 0)
             state.pitchTarget = -math.asin(util.clamp(aimDir.z / aimDir:length(), -1, 1))
+            -- Turn faster than the main loop's default while aiming, so the deadline below is usually enough
+            state.turnRate = AIM_TURN_RATE
             local forward = omwself.rotation:apply(util.vector3(0, 1, 0))
             local pitch = -math.asin(util.clamp(forward.z, -1, 1))
             local yawError = moveutils.lookRotation(omwself, omwself.position + state.aimDirection)
             aimed = math.abs(yawError) < AIM_TOLERANCE and math.abs(state.pitchTarget - pitch) < AIM_TOLERANCE
+            if not aimed and now - task.startedAt >= AIM_TIMEOUT then
+                magicUtil.log(config.name, "aim deadline reached, casting anyway. Yaw error",
+                    string.format("%.2f", yawError), "rad")
+                aimed = true
+            end
         end
 
         if task.phase == "prepare" then

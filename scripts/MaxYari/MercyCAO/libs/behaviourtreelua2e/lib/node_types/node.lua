@@ -79,6 +79,9 @@ end
 function Node:abort() -- Should rename to abort
   -- Call user-facing finish callback
   if self.tree.debugLevel >= 1 then self.tree:print(self.name .. " ABORTED") end
+  -- Aborting still goes through finish(), so a node whose finish() has a side effect needs to tell the two apart.
+  -- Wiped by initApiObject on the next start.
+  self.api.aborted = true
   self:finish()
 end
 

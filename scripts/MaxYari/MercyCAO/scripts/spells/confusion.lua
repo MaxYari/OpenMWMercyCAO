@@ -16,14 +16,14 @@ local DISPEL_CHECK_PERIOD = 0.1     -- How often a confused player checks whethe
 
 local spell = {
     key = "confusion",
-    version = 2,
+    version = 3,
     bundle = "exotic",
     minLevel = 8,
     character_type = { CHARACTER.Spellcaster, CHARACTER.Marksman },
     playerTargetOnly = true,
     weight = 1,
-    prewarm = 1,
-    cooldown = 10,
+    prewarm = 2,
+    cooldown = 20,
     record = {
         name = "Confusion",
         type = core.magic.SPELL_TYPE.Spell,

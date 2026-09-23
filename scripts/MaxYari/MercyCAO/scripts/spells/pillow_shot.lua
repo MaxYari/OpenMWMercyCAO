@@ -27,7 +27,7 @@ local HIT_EVENT = "Mercy_PillowShot_Hit"
 
 local spell = {
     key = "pillowShot",
-    version = 1,
+    version = 2,
     bundle = "exotic",
     minLevel = 10,
     character_type = { CHARACTER.Spellcaster },

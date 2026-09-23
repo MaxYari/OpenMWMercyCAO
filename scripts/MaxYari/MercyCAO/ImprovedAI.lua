@@ -96,7 +96,10 @@ local navService = NavigationService({
 
 -- Actor type variables
 local spellCastersAreVanilla = true
-local isGuard = selfActor:isAGuard() 
+local isGuard = selfActor:isAGuard()
+-- Casts by class (a casting major skill, or a vampire). Only these and the NPCs Mercy upgrades get engine magic
+-- windows, see prepareMagic.
+local isSpellCaster = selfActor:isSpellCaster()
 -- Data containers
 local bTrees = nil
 local blacklist = nil
@@ -149,6 +152,15 @@ local state = {
    ambushAttack = false,    -- Sneaking up ended in melee range: the Combat tree does one attack right away
    enemyInSight = false,    -- Result of the last line of sight check while warning
 
+   -- Set by the tree while it is committed to an attack: from the moment it decides to swing until the whole burst is
+   -- over, including the gaps between swings where no attack animation is playing (state.attackState is read off the
+   -- animation, so it reads NO_STATE there). Mercy's own spells don't need it - they're a branch the tree only
+   -- reaches after the attacks - but OSSC casts on its own schedule and writes the attack control itself, so it's held
+   -- back while this is set (see updateOSSCHold).
+   inAttackSequence = false,
+   -- PeriodicCondition node title -> simulation time it may let its child run again. Shared by every copy of a node.
+   periodicDueAt = {},
+
    -- Magic fields
    castables = nil,         -- What magic the engine might cast, scanned on combat start (magic_util.scanCastables)
    customSpells = {},       -- Record ids of Mercy's own spells by key, sent by the global script
@@ -160,6 +172,8 @@ local state = {
    customSpellCooldowns = {}, -- Custom spell key -> simulation time its cooldown ends
    customSpellMisses = {},    -- Custom spell key -> misses in a row since its last cooldown
    customSpellMissedAt = {},  -- Custom spell key -> simulation time of its last miss
+   enemyDispelWorth = 0,      -- Spells on the enemy worth a Dispel, refreshed twice a second (spells/dispel.lua)
+   selfNeedsMending = false,  -- An attribute is far enough below its base to be worth restoring (spells/restore_self.lua)
    repositioning = false,     -- Moving to repositionPoint (e.g. while invisible), set by the tree
    repositionPoint = nil,     -- Where to reposition to, picked by PickRepositionPoint
    hideSpotReady = false,     -- The HIDE state starts with a hiding spot already picked in repositionPoint
@@ -196,30 +210,36 @@ local state = {
    end,
 
    -- Hand the actor to the engine for a moment so it can pick a spell: only if it has magic it could cast right now,
-   -- isn't attacking or staggered, and is out of melee reach (the engine would swing or turn to face first otherwise)
+   -- isn't attacking or staggered, and is out of melee reach (the engine would swing or turn to face first otherwise).
+   -- Checked by the Magic Window branch, which the tree only reaches between attacks.
    canHandOverForMagic = function(self)
-      -- A custom spell waiting for the current cast or attack to end gets the next opening, not the engine
-      local customSpellReserved = (self.customSpellReservedUntil or 0) > core.getSimulationTime()
-      if not spellCastersAreVanilla or self.magicBusy or self.repositioning or self.combatState == enums.COMBAT_STATE.HIDE
-         or customSpellReserved
+      -- With OSSC installed there's nothing to hand over for: OSSC picks and casts the actor's own spells itself,
+      -- and Mercy holds and releases it instead (see updateOSSCHold). Target switching still goes to the engine.
+      -- Checked by install, not by OSSC's caster script being on the actor: that attaches a moment into the fight,
+      -- and a window opened before it let the engine ready a spell in the full casting stance.
+      if magicUtil.osscInstalled() then return false end
+      if not spellCastersAreVanilla or self.magicBusy or self.repositioning
          or not self.castables or not self.castables.canUseMagic then
          return false
       end
+      -- Only while actually fighting. Warning, investigating, sneaking up, hiding, retreating and surrendering are
+      -- routines of their own: handing the actor to the engine in the middle of one derails it.
+      if self.combatState ~= enums.COMBAT_STATE.FIGHT then return false end
+      -- A burst's follow-through can still be playing when the tree gets here
       if self.attackState ~= enums.ATTACK_STATE.NO_STATE or self.staggerGroup or self.range <= self.reach then
          return false
       end
       return magicUtil.canAttemptCastNow(omwself, self.castables)
    end,
    -- Whether Mercy can cast one of its custom spells (by key, e.g. "levitateBolt") right now. When it can't, the reason
-   -- is left in castBlockReason for debug logging, and castBlockTransient is set when the reason is a cast or attack in
-   -- progress, which will soon be over (see PeriodicInterrupt).
+   -- is left in castBlockReason for debug logging (see PeriodicCondition).
    canCastCustom = function(self, key)
       local spellId = self.customSpells[key]
       local reason = nil
       if not spellId or not self.knownCustomSpells[key] then reason = "doesn't know the spell"
       -- Learned in a game where a mod it needs (e.g. Lua Physics) was installed, but isn't anymore
       elseif not magicUtil.isAvailable(key) then reason = "not available in this game"
-      elseif self.magicBusy then reason = "busy with other magic"; self.castBlockTransient = true
+      elseif self.magicBusy then reason = "busy with other magic"
       elseif self.repositioning then reason = "repositioning"
       elseif self.combatState == enums.COMBAT_STATE.HIDE then reason = "hiding"
       elseif not self.enemyActor then reason = "no enemy"
@@ -227,9 +247,10 @@ local state = {
          reason = "only cast at the player"
       elseif (self.customSpellRestUntil or 0) > core.getSimulationTime() then reason = "resting after spells back to back"
       elseif (self.customSpellCooldowns[key] or 0) > core.getSimulationTime() then reason = "on cooldown"
-      elseif self.attackState ~= enums.ATTACK_STATE.NO_STATE or self.staggerGroup then
-         reason = "attacking or staggered"; self.castBlockTransient = true
-      elseif magicUtil.isCasting(omwself) then reason = "already casting"; self.castBlockTransient = true
+      -- The Spells branch only runs between attacks, but a burst's follow-through (or the engine's own swing, in a
+      -- marksman or spell stance window) can still be playing when it gets here
+      elseif self.attackState ~= enums.ATTACK_STATE.NO_STATE or self.staggerGroup then reason = "attacking or staggered"
+      elseif magicUtil.isCasting(omwself) then reason = "already casting"
       elseif magicUtil.isSilenced(omwself) then reason = "silenced"
       elseif not magicUtil.canAfford(omwself, spellId) then reason = "not enough magicka"
       end
@@ -382,6 +403,11 @@ local state = {
          return min + math.random() * (max - min)
       end
    end,
+   -- A pause or cooldown in seconds, divided by the Combat Intensity setting: intense NPCs wait less between attacks
+   -- and between moves. Used by the tree wherever a duration should follow intensity ($:pause(1,2) instead of $r(1,2)).
+   pause = function(self, min, max)
+      return self.r(min, max) / CombatIntensity
+   end,
    rSlowSpeed = function(self)
       return gutils.lerp(self.slowSpeed, self.slowSpeed * 2, math.random())
    end,
@@ -403,7 +429,9 @@ local state = {
          n = math.random(1, 2)
       end
       if self.inHamMode then n = n * 2 + 1 end
-      return n
+      -- Longer bursts at higher Combat Intensity
+      n = math.floor(n * CombatIntensity + 0.5)
+      return math.max(1, n)
    end,
    attPauseFromSkill = function(self)
       if not self.weaponSkill then return 0 end
@@ -469,6 +497,20 @@ local function randomiseInclinations()
    local anger = luaRandom:random()
    if anger < CanGoHamProb then
       state.canGoHam = true
+   end
+
+   -- Combat Intensity, applied last so it shifts whatever personality was rolled above rather than replacing it.
+   -- The weights (nearStop/nearBack/midStop/midChase) are picked between by RunRandom, which normalises by their
+   -- total, so they need no upper bound. rootedAttackInc and midAttackInc are 0-100 probabilities for RandomThrough,
+   -- so those stay clamped. The strafe weights are left alone: strafing isn't hanging back, and it's what Mercy's
+   -- movement looks like.
+   if CombatIntensity ~= 1 then
+      state.nearStopInc = state.nearStopInc / CombatIntensity
+      state.nearBackInc = state.nearBackInc / CombatIntensity
+      state.midStopInc = state.midStopInc / CombatIntensity
+      state.midChaseInc = state.midChaseInc * CombatIntensity
+      state.rootedAttackInc = util.clamp(state.rootedAttackInc * CombatIntensity, 0, 100)
+      state.midAttackInc = util.clamp(state.midAttackInc * CombatIntensity, 0, 100)
    end
 
    -- Print the modified state for verification
@@ -612,6 +654,9 @@ ScaredProbModifier = settings:get("ScaredProbModifier")
 SurrenderHealthFraction = settings:get("SurrenderHealthFraction")
 state.investigateProb = settings:get("InvestigateProb") * 100
 state.hideModifier = settings:get("HideModifier") or 1
+-- How hard NPCs press an attack, see randomiseInclinations and state:pause. Read once: the inclinations it scales are
+-- rolled once at startup, so changing it takes effect on a save reload.
+CombatIntensity = math.max(0.1, settings:get("CombatIntensity") or 1)
 -- Shares of spellcasters, and of NPCs knowing no spells, that get Mercy's custom spells on their first fight
 local magicSettings = storage.globalSection('SettingsMercyCAOMagic')
 local casterCustomSpellsChance = magicSettings:get("CasterCustomSpellsChance") or 0
@@ -644,6 +689,8 @@ local retreatedOnce = false
 local askedForMercyOnce = false
 -- Custom spells rolled on the first fight: key -> learned spell record id, or false. nil until rolled. Saved.
 local learnedCustomSpells = nil
+-- This NPC knew no spells and Mercy made a caster of it on its first fight. Saved, so it keeps its magic windows.
+local upgradedToCaster = false
 local pitchSteered = false -- Pitch was changed while aiming and may still need levelling
 -- Debug logging of who drives the actor in combat and its stance, logged only when they change
 local lastControlOwner = nil
@@ -656,10 +703,16 @@ local function noteControlOwner(owner, stance)
 end
 
 -- Custom spell hit tracking. A cast puts the spell on cooldown right away, so it isn't cast again while waiting to see
--- whether it lands. Not landing within HIT_WINDOW is a miss: a miss lifts the cooldown, unless it's the
+-- whether it lands. Nothing waits for the answer: the tree carries on attacking as soon as the cast is done, and each
+-- released target spell leaves a pending check in pendingSpellHits that the main loop resolves (checkCustomSpellHits).
+-- The wait starts when the spell is released (onCustomSpellCast runs on the release key, or right away for a cast
+-- through OSSC) and lasts HIT_WINDOW, without working out the flight time. Not landing by then is a miss: a miss lifts
+-- the cooldown, so the next time the tree reaches the spell it can cast it again - unless it's the
 -- CUSTOM_SPELL_MISSES_BEFORE_COOLDOWN'th miss in a row. A miss is forgotten once a full cooldown has passed since it.
-local HIT_WINDOW = 3
-local pendingSpellHit = nil
+local HIT_WINDOW = 2
+-- Spell key -> { spellId, target, deadline }. One per spell, so a second spell cast inside the window doesn't lose
+-- the first one's check.
+local pendingSpellHits = {}
 
 state.onCustomSpellCast = function(self, key, target)
    local spellId = self.customSpells[key]
@@ -684,25 +737,24 @@ state.onCustomSpellCast = function(self, key, target)
    if (self.customSpellMisses[key] or 0) > 0 and now - (self.customSpellMissedAt[key] or 0) >= cooldown then
       self.customSpellMisses[key] = 0
    end
-   pendingSpellHit = { key = key, spellId = spellId, target = target, deadline = now + HIT_WINDOW }
+   pendingSpellHits[key] = { spellId = spellId, target = target, deadline = now + HIT_WINDOW }
 end
 
-local function checkCustomSpellHit(now)
-   local pending = pendingSpellHit
+-- Resolves one pending check. Returns true once it's settled (hit or miss), false while it's still waiting.
+local function resolveSpellHit(key, pending, now)
    -- Only within the window: a check left pending when a fight ended mustn't trigger the spell's effect much later
    local hit = now <= pending.deadline and pending.target:isValid()
-      and magicUtil.hasActiveSpellFrom(pending.target, pending.spellId, omwself.object)
-   if not hit and now < pending.deadline then return end
-   pendingSpellHit = nil
+      and (magicUtil.hasActiveSpellFrom(pending.target, pending.spellId, omwself.object)
+         or magicUtil.hasActiveSpell(pending.target, pending.spellId))
+   if not hit and now < pending.deadline then return false end
 
-   local key = pending.key
    if hit then
       state.customSpellMisses[key] = 0
       magicUtil.log(key, "hit - stays on cooldown")
       -- The spell's own effect code, from its file in scripts/spells
       local definition = magicUtil.CUSTOM_SPELLS[key]
       if definition.onHit then definition.onHit(omwself.object, pending.target, state) end
-      return
+      return true
    end
 
    local misses = (state.customSpellMisses[key] or 0) + 1
@@ -715,7 +767,25 @@ local function checkCustomSpellHit(now)
       state.customSpellMisses[key] = 0
       magicUtil.log(key, "missed", misses, "times in a row - stays on cooldown")
    end
+   return true
 end
+
+local function checkCustomSpellHits(now)
+   for key, pending in pairs(pendingSpellHits) do
+      -- Clearing a field of the table being traversed is allowed in Lua
+      if resolveSpellHit(key, pending, now) then pendingSpellHits[key] = nil end
+   end
+end
+-- With OSSC installed, casting the actor's own spells is OSSC's job rather than the engine's: Mercy doesn't hand the
+-- actor over for magic at all (see canHandOverForMagic) and instead holds OSSC back at the moments a cast would ruin
+-- what Mercy is doing - mid attack burst, while Mercy casts one of its own spells, while repositioning, and during
+-- every routine that isn't a straight fight (warning, investigating, sneaking up, hiding, retreating, surrendering).
+local function updateOSSCHold()
+   local hold = state.combatState ~= enums.COMBAT_STATE.FIGHT
+      or state.inAttackSequence or state.magicBusy or state.castingCustom or state.repositioning
+   magicUtil.osscSetPaused(hold)
+end
+
 -- While warning (STAND_GROUND): when the enemy was last in line of sight, and when it was last checked
 local lastSeenAt = 0
 local lastSightCheck = -1e42
@@ -815,7 +885,7 @@ local function learnCustomSpells(keys)
    for _, spellId in pairs(state.customSpells) do
       pcall(function() actorSpells:remove(spellId) end)
    end
-   pendingSpellHit = nil
+   pendingSpellHits = {}
    learnedCustomSpells = {}
    for _, key in ipairs(keys) do
       local spellId = state.customSpells[key]
@@ -845,22 +915,48 @@ local function learnConsoleSpells()
    end
 end
 
--- On combat start: scan what magic the engine might use, and on the first fight let a spellcaster (anyone knowing a
--- normal spell) learn Mercy's custom spells
+-- The actor's own spells as Mercy last saw them in full (magic_util.scanCastables), for what they cost: the Magic
+-- Window checks it can afford one, mana potions are drunk when it can't. OSSC strips an actor's spells from its list
+-- while it runs the actor's casting in a fight, so a scan at combat start can come back empty for a mage. The richest
+-- scan of the session is kept instead, starting with one made when Mercy starts on the actor (almost always out of
+-- combat, before OSSC can have stripped anything). Whether the actor is a spellcaster doesn't come from here at all:
+-- that's its class (isSpellCaster), which nothing can strip.
+local spellScan = nil
+local function scanOwnMagic()
+   -- Mercy's own spells don't count, old records of them (from before a version bump) included
+   local ignored = {}
+   for _, spellId in pairs(state.customSpells) do ignored[spellId] = true end
+   for _, spellId in pairs(learnedCustomSpells or {}) do
+      if spellId then ignored[spellId] = true end
+   end
+   local scan = magicUtil.scanCastables(omwself, ignored)
+   if not spellScan or scan.combatSpellCount > spellScan.combatSpellCount then spellScan = scan end
+   -- Items aren't touched by OSSC and can change between fights: those always come from the fresh scan
+   state.castables = {
+      knownSpellCount = spellScan.knownSpellCount,
+      combatSpellCount = spellScan.combatSpellCount,
+      cheapestSpellCost = spellScan.cheapestSpellCost,
+      hasItems = scan.hasItems,
+      canUseMagic = spellScan.combatSpellCount > 0 or scan.hasItems,
+   }
+end
+
+-- On combat start: work out what magic the actor has, and on its first fight let a spellcaster - by class, see
+-- isSpellCaster - learn Mercy's custom spells, or upgrade a non-caster into one
 local function prepareMagic()
    lastControlOwner = nil
-   pendingSpellHit = nil
-   -- Custom spells are Mercy's to cast, they don't make handing the actor to the engine worthwhile
-   local customSpellIds = {}
-   for _, spellId in pairs(state.customSpells) do customSpellIds[spellId] = true end
-   state.castables = magicUtil.scanCastables(omwself, customSpellIds)
+   pendingSpellHits = {}
+   -- The trees just stop being run when a fight ends, so a branch can be left part way through with the flag set.
+   -- Clearing it here means a new fight never starts with magic locked out.
+   state.inAttackSequence = false
+   scanOwnMagic()
 
    local actorSpells = types.Actor.spells(omwself)
    local firstFightCaster = false
    -- For the custom spell distribution: its level and what kind of character it is
    local function distributionNpc()
       local characterType = enums.CHARACTER_TYPE.Melee
-      if state.castables.knownSpellCount > 0 then
+      if isSpellCaster then
          characterType = enums.CHARACTER_TYPE.Spellcaster
       else
          for _, weapon in ipairs(types.Actor.inventory(omwself):getAll(types.Weapon)) do
@@ -872,26 +968,29 @@ local function prepareMagic()
       end
       magicUtil.log("Custom spell distribution: level", selfActor:levelStat().current, characterType)
       return { level = selfActor:levelStat().current, characterType = characterType,
-         extraSpellRolls = extraSpellsForHighLevelCasters }
+         extraSpellRolls = extraSpellsForHighLevelCasters,
+         -- Seeded from the record id, so which spells this NPC gets is the same in every playthrough
+         rng = function() return luaRandom:random() end }
    end
-   if pendingConsoleSpells and (not pendingConsoleSpells.next or state.castables.knownSpellCount > 0) then
+   if pendingConsoleSpells and (not pendingConsoleSpells.next or isSpellCaster) then
       learnConsoleSpells()
    elseif not learnedCustomSpells then
-      if state.castables.knownSpellCount > 0 then
+      if isSpellCaster then
          firstFightCaster = true
-         if math.random() < casterCustomSpellsChance then
+         if luaRandom:random() < casterCustomSpellsChance then
             learnCustomSpells(magicUtil.rollCustomSpells(distributionNpc()))
          else
             learnCustomSpells({})
             magicUtil.log("Spellcaster not picked for custom spells")
          end
-      elseif math.random() < nonCasterCustomSpellsChance then
+      elseif luaRandom:random() < nonCasterCustomSpellsChance then
          firstFightCaster = true
-         magicUtil.log("Knows no spells, upgraded to a spellcaster")
+         upgradedToCaster = true
+         magicUtil.log("Not a spellcaster by class, upgraded to one")
          learnCustomSpells(magicUtil.rollCustomSpells(distributionNpc()))
       else
          learnedCustomSpells = {}
-         magicUtil.log("Knows no spells, gets no custom spells")
+         magicUtil.log("Not a spellcaster by class, gets no custom spells")
       end
    else
       -- The global script recreates a custom spell when its definition changes: swap the old record for the new one
@@ -910,12 +1009,20 @@ local function prepareMagic()
    end
    updateSpellCombatUpdates()
 
+   -- Handing the actor to the engine to pick a spell (the Magic Window) is only for spellcasters: NPCs whose class
+   -- casts, and the ones Mercy upgraded into casters. Knowing a single combat spell doesn't make a bandit a mage, and
+   -- the handover cost it its melee rhythm. Decided after the upgrade roll above, so a fresh upgrade counts.
+   if not isSpellCaster and not upgradedToCaster and state.castables.canUseMagic then
+      magicUtil.log("Not a spellcaster by class: no engine magic windows")
+      state.castables.canUseMagic = false
+   end
+
    local knownCustomSpellIds = {}
    for key, known in pairs(state.knownCustomSpells) do
       if known and magicUtil.isAvailable(key) then knownCustomSpellIds[#knownCustomSpellIds + 1] = state.customSpells[key] end
    end
    manaPotions.onCombatStart(omwself.object, manaPotionChance, firstFightCaster, state.castables.cheapestSpellCost,
-      knownCustomSpellIds)
+      knownCustomSpellIds, function() return luaRandom:random() end)
 
    -- Some spells stay unused for a while after a fight starts
    local now = core.getSimulationTime()
@@ -1043,9 +1150,10 @@ local function onUpdate(dt)
    -- Time
    local now = core.getSimulationTime()
 
-   if pendingSpellHit then checkCustomSpellHit(now) end
+   if next(pendingSpellHits) then checkCustomSpellHits(now) end
    for i = 1, #spellCombatUpdates do spellCombatUpdates[i](state) end
    manaPotions.combatUpdate(omwself.object, now)
+   updateOSSCHold()
 
 
    -- Storing combat targets in history
@@ -1460,7 +1568,9 @@ end)
 -- In the text key handler: Theres no way to know for which bonegroup the text key was triggered?
 I.AnimationController.addTextKeyHandler(nil, function(groupname, key)
    --print("Animation text key! " .. groupname .. " : " .. key)
-   if string.find(key, "chop start") or string.find(key, "thrust start") or string.find(key, "slash start") then
+   -- "shoot start" is a bow, crossbow or thrown weapon: without it a draw only showed up once it reached "min attack"
+   if string.find(key, "chop start") or string.find(key, "thrust start") or string.find(key, "slash start")
+      or string.find(key, "shoot start") then
       state.attackState = enums.ATTACK_STATE.WINDUP_START
       state.attackGroup = groupname
    end
@@ -1633,12 +1743,14 @@ return {
             aiEnabled and "engine" or "mercy", "| stance", selfActor:getDetailedStance())
       end,
       onSave = function()
-         return { warnsLeft = state.warnsLeft, learnedCustomSpells = learnedCustomSpells, manaPotions = manaPotions.save() }
+         return { warnsLeft = state.warnsLeft, learnedCustomSpells = learnedCustomSpells,
+            upgradedToCaster = upgradedToCaster, manaPotions = manaPotions.save() }
       end,
       onLoad = function(data)
          if data then
             state.warnsLeft = data.warnsLeft
             learnedCustomSpells = data.learnedCustomSpells
+            upgradedToCaster = data.upgradedToCaster == true
             manaPotions.load(data.manaPotions)
          end
       end,

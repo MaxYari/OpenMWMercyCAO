@@ -48,6 +48,55 @@ module.NEVER_CAST_EFFECTS = toSet({
 -- Healing is left to Fair Care
 module.LEFT_TO_FAIR_CARE = toSet({ "RestoreHealth", "RestoreFatigue", "RestoreMagicka" })
 
+-- Magic worth a Dispel when an enemy has it: things an NPC could plausibly SEE on its enemy. Resistances, spell
+-- absorption, reflect and the fortify effects are left out on purpose - they are stronger to strip, but the NPC has
+-- no way of knowing they're there, and stripping them would be reading the player's sheet.
+-- Note the engine's Dispel only removes temporary, normal-spell effects (not potions, enchantments, abilities or
+-- powers), and it removes whole spells at once, so this list is only used to decide whether casting is worth it.
+module.DISPEL_WORTHY_EFFECTS = toSet({
+    -- Shields, the glow is visible
+    "Shield", "FireShield", "LightningShield", "FrostShield",
+    -- Concealment
+    "Invisibility", "Chameleon", "Sanctuary",
+    -- Mobility
+    "Levitate", "SlowFall",
+    -- Conjured gear
+    "BoundDagger", "BoundLongsword", "BoundMace", "BoundBattleAxe", "BoundSpear", "BoundLongbow",
+    "BoundCuirass", "BoundHelm", "BoundBoots", "BoundShield", "BoundGloves",
+    -- Summons: dispelling the summoner unsummons them
+    "SummonScamp", "SummonClannfear", "SummonDaedroth", "SummonDremora", "SummonAncestralGhost",
+    "SummonSkeletalMinion", "SummonBonewalker", "SummonGreaterBonewalker", "SummonBonelord",
+    "SummonWingedTwilight", "SummonHunger", "SummonGoldenSaint", "SummonFlameAtronach",
+    "SummonFrostAtronach", "SummonStormAtronach", "SummonCenturionSphere", "SummonFabricant",
+    "SummonWolf", "SummonBear", "SummonBonewolf", "SummonCreature04", "SummonCreature05",
+})
+
+-- An effect with this little time left isn't worth a cast (the engine's own Dispel rating uses the same cut-off)
+local DISPEL_MIN_REMAINING = 3
+
+-- How many of the target's spells a Dispel would be worth removing. Counts whole spells rather than effects, because
+-- one Dispel roll removes a whole spell: an enemy carrying a single five-effect buff is one spell's worth, not five.
+-- Only counts what Dispel can actually take: temporary effects from normal spells (activeSpell.temporary rules out
+-- abilities, powers, diseases and constant effects; fromEquipment rules out worn enchantments).
+function module.dispelWorthyCount(target)
+    local count = 0
+    for _, activeSpell in pairs(types.Actor.activeSpells(target)) do
+        if activeSpell.temporary and not activeSpell.fromEquipment then
+            local record = core.magic.spells.records[activeSpell.id]
+            if record and record.type == core.magic.SPELL_TYPE.Spell then
+                for _, effect in pairs(activeSpell.effects) do
+                    if module.DISPEL_WORTHY_EFFECTS[string.lower(effect.id)]
+                        and (effect.duration or 0) > DISPEL_MIN_REMAINING then
+                        count = count + 1
+                        break
+                    end
+                end
+            end
+        end
+    end
+    return count
+end
+
 -- An effect the engine might decide to cast in combat
 function module.isUsefulEffect(effect)
     local id = string.lower(effect.id)
@@ -143,10 +192,24 @@ function module.canAfford(actor, spellId)
     return spell ~= nil and types.Actor.stats.dynamic.magicka(actor).current >= spell.cost
 end
 
--- The target has this spell active on it, cast by 'caster'
+-- The target has this spell active on it, cast by 'caster'. Ids are compared case insensitively: the engine hands
+-- record ids back in whatever case it stored them, and a mismatch here used to read as a miss (which lifts the
+-- spell's cooldown, so the spell came straight back).
 function module.hasActiveSpellFrom(target, spellId, caster)
+    local wanted = string.lower(spellId)
     for _, activeSpell in pairs(types.Actor.activeSpells(target)) do
-        if activeSpell.id == spellId and activeSpell.caster == caster then return true end
+        if string.lower(activeSpell.id) == wanted and activeSpell.caster == caster then return true end
+    end
+    return false
+end
+
+-- The target has this spell active on it whoever cast it. Used as a fallback when checking whether a cast landed:
+-- the caster reference can be missing (a reflected or absorbed spell, a projectile the engine re-sourced), and
+-- treating that as a miss lifts the cooldown and makes the NPC spam the spell.
+function module.hasActiveSpell(target, spellId)
+    local wanted = string.lower(spellId)
+    for _, activeSpell in pairs(types.Actor.activeSpells(target)) do
+        if string.lower(activeSpell.id) == wanted then return true end
     end
     return false
 end
@@ -154,6 +217,63 @@ end
 -- The engine or Mercy is casting (or readying spells)
 function module.isCasting(actor)
     return animationOk and animation.isPlaying(actor, "spellcast")
+end
+
+-- OSSC ---------------------------------------------------------------------------------------------------------
+-- Oblivion-Style Spell Casting. Whether it's installed is fixed for the session, but its per-actor caster script
+-- isn't: OSSC attaches it on its own combat event (a moment after a fight starts) and detaches it after, so decisions
+-- go by osscInstalled() and the per-actor interface is looked up each time it's used.
+local interfacesOk, interfaces = pcall(require, 'openmw.interfaces')
+local util = require('openmw.util')
+
+local OSSC_CONTENT_FILE = "Oblivion Style Spell Casting OSSC.omwscripts"
+local osscInstalled = nil
+function module.osscInstalled()
+    if osscInstalled == nil then osscInstalled = core.contentFiles.has(OSSC_CONTENT_FILE) end
+    return osscInstalled
+end
+
+function module.osscCaster()
+    local caster = interfacesOk and interfaces.OSSC_Caster
+    if caster and type(caster.castSpellAtTarget) == "function" then return caster end
+    return nil
+end
+
+-- Cast through OSSC: it works out the direction to the target itself and hands the spell to Spell Framework Plus, out
+-- of any stance - no stance switch, no aiming, no use press. The spell is launched from its record, so it doesn't
+-- matter that OSSC strips spells from the actor's list while it runs the actor's casting.
+-- With OSSC's caster script on this actor the cast goes through it (it pays the magicka) and a refusal comes back as
+-- ok=false. Without it (not attached yet at the start of a fight) OSSC's global route casts for any actor, with
+-- Spell Framework Plus charging the magicka, but it can't answer: the cast counts as sent, and one that never
+-- happened shows up as a miss. Returns ok, reason.
+function module.osscCast(spellId, target)
+    local caster = module.osscCaster()
+    if caster then return caster.castSpellAtTarget({ spellId = spellId, target = target }) end
+    local halfHeight = types.Actor.getPathfindingAgentBounds(omwself).halfExtents.z
+    core.sendGlobalEvent("OSSC_CastSpellAtTarget", {
+        caster = omwself.object, spellId = spellId, target = target,
+        -- The global route starts at the caster's feet by default: chest height and a step ahead instead, as OSSC's
+        -- own casts do
+        startPos = omwself.position + util.vector3(0, 0, halfHeight * 1.5), spawnOffset = 80,
+    })
+    return true
+end
+
+-- Hold or release OSSC's own quick-casting for this actor. Mercy holds it under its own reason, so a hold another
+-- mod is keeping isn't released by Mercy letting go of its own.
+local osscPaused = false
+function module.osscSetPaused(paused)
+    local caster = module.osscCaster()
+    if not caster then
+        -- OSSC detaches its caster script when a fight ends and attaches a fresh one for the next. That one starts
+        -- with no holds, so forget ours rather than leaving it thinking the hold is still in place.
+        osscPaused = false
+        return
+    end
+    if paused == osscPaused then return end
+    if paused then caster.pause("MercyCAO") else caster.unpause("MercyCAO") end
+    osscPaused = paused
+    module.log("OSSC quick-casting", paused and "held" or "released")
 end
 
 -- Custom spells ---------------------------------------------------------------------------------------------------
@@ -185,6 +305,8 @@ module.CUSTOM_SPELL_MISSES_BEFORE_COOLDOWN = 2
 module.EXOTIC_BUNDLE_CHANCE = 0.33
 module.MAGIC_AND_EXOTIC_COMBO_CHANCE = 0.25
 module.AUX_BUNDLE_CHANCE = 0.33
+-- The counterspell bundle is rolled separately from the rest, see rollCustomSpells
+module.COUNTER_BUNDLE_CHANCE = 0.5
 -- Spellcasters of this level and above roll the normal / exotic spells twice (aux still once)
 module.EXTRA_SPELL_ROLL_LEVEL = 16 -- (when npc.extraSpellRolls, from the settings)
 
@@ -253,7 +375,7 @@ end
 local function pickFromBundle(bundle, picked, npc)
     local candidates, totalWeight = bundleCandidates(bundle, picked, npc)
     local scale = totalWeight > 1 and 1 / totalWeight or 1
-    local roll = math.random()
+    local roll = npc.rng()
     local cumulative = 0
     for _, key in ipairs(candidates) do
         cumulative = cumulative + module.CUSTOM_SPELLS[key].weight * scale
@@ -266,6 +388,9 @@ end
 -- characterType (enums.CHARACTER_TYPE). For testing, the "luamercy" console command gives specific spells instead
 -- (ignoring these limits).
 function module.rollCustomSpells(npc)
+    -- Every roll goes through npc.rng, which the NPC script seeds from its record id, so an NPC's spells are the same
+    -- in every playthrough, the way its inclinations are. Falls back to the global roller if a caller passes none.
+    npc.rng = npc.rng or math.random
     local picked = {}
     local function pickFrom(bundle)
         local key = pickFromBundle(bundle, picked, npc)
@@ -278,20 +403,22 @@ function module.rollCustomSpells(npc)
         rolls = 2
     end
     for _ = 1, rolls do
-        local exotic = math.random() < module.EXOTIC_BUNDLE_CHANCE
+        local exotic = npc.rng() < module.EXOTIC_BUNDLE_CHANCE
         -- No exotic spell this NPC can get (level, caster or ranged limits, or all picked): the roll counts as normal
         if exotic and #bundleCandidates("exotic", picked, npc) == 0 then
             module.log("No exotic spells for this NPC, rolling normal instead")
             exotic = false
         end
-        if math.random() < module.MAGIC_AND_EXOTIC_COMBO_CHANCE then
+        if npc.rng() < module.MAGIC_AND_EXOTIC_COMBO_CHANCE then
             pickFrom("normal")
             if exotic then pickFrom("exotic") end
         else
             pickFrom(exotic and "exotic" or "normal")
         end
     end
-    if math.random() < module.AUX_BUNDLE_CHANCE then pickFrom("aux") end
+    if npc.rng() < module.AUX_BUNDLE_CHANCE then pickFrom("aux") end
+    -- Counterspells are rolled on their own, so an NPC can get one whatever else it ended up with
+    if npc.rng() < module.COUNTER_BUNDLE_CHANCE then pickFrom("counter") end
     return picked
 end
 

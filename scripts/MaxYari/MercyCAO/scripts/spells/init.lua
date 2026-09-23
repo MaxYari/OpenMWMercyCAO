@@ -38,5 +38,7 @@ return {
     require(mp .. "scripts/spells/pillow_shot"),
     require(mp .. "scripts/spells/blindness"),
     require(mp .. "scripts/spells/confusion"),
+    require(mp .. "scripts/spells/dispel"),
+    require(mp .. "scripts/spells/restore_self"),
     -- Not in use: require(mp .. "scripts/spells/box_prison"),
 }
