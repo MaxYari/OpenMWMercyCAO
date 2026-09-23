@@ -385,7 +385,7 @@ function Actor:isVampire()
     return isVampire
 end
 
-local castingSkills = { "conjuration", "alteration", "destruction", "mysticism", "restoration" }
+local castingSkills = { "conjuration", "alteration", "destruction", "illusion", "mysticism", "restoration" }
 function Actor:isSpellCaster()
     if not types.NPC.objectIsInstance(self.gameObject) then return false end
     local className = types.NPC.record(self.gameObject.recordId).class

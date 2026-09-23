@@ -16,7 +16,7 @@ local SCAN_PERIOD = 0.5
 
 local spell = {
     key = "dispel",
-    version = 1,
+    version = 2,
     bundle = "counter",
     minLevel = 8,
     character_type = CHARACTER.All,
@@ -30,28 +30,41 @@ local spell = {
         alwaysSucceedFlag = true,
         isAutocalc = false,
         effects = {
-            { id = "dispel", range = RANGE.Target, area = 0, duration = 1, magnitudeMin = 100, magnitudeMax = 100 },
+            { id = "dispel", range = RANGE.Target, area = 0, duration = 1, magnitudeMin = 50, magnitudeMax = 100 },
         },
     },
 }
 
 -- Caster's local script, every combat frame. Keeps state.enemyDispelWorth up to date for the tree to read, at
--- SCAN_PERIOD rather than every frame, and only when the answer could actually be used.
+-- SCAN_PERIOD rather than every frame, and only while the spell is off cooldown. Not gated on the full canCastCustom:
+-- that fails during every attack burst, and the answer has to be fresh for the moment right after one, when the tree
+-- gets to its spells.
 function spell.combatUpdate(state)
     local now = core.getSimulationTime()
     if now < (state.dispelScanAt or 0) then return end
-    -- Nothing to decide while there's no enemy, or while the spell can't be cast anyway
-    if not state.enemyActor or not state:canCastCustom(spell.key) then
+    state.dispelScanAt = now + SCAN_PERIOD
+    if not state.enemyActor or (state.customSpellCooldowns[spell.key] or 0) > now then
         state.enemyDispelWorth = 0
-        state.dispelScanAt = now + SCAN_PERIOD
         return
     end
-    state.dispelScanAt = now + SCAN_PERIOD
     local magicUtil = require(magicUtilPath)
     state.enemyDispelWorth = magicUtil.dispelWorthyCount(state.enemyActor)
     if state.enemyDispelWorth > 0 then
         magicUtil.log("Dispel: enemy has", state.enemyDispelWorth, "spell(s) worth unweaving")
     end
+end
+
+-- Caster's local script, on release: remember how much there was to unweave, for landed() below
+function spell.onCast(caster, target, state)
+    state.dispelWorthAtCast = require(magicUtilPath).dispelWorthyCount(target)
+end
+
+-- Dispel is instant: it leaves nothing on the target that the usual hit check could find (the engine drops the spell
+-- again on its next update), so it has landed when there's less on the enemy worth unweaving than at release.
+-- A bolt that hit but whose rolls stripped nothing reads as a miss - which is what it is for the caster: the enemy's
+-- magic is still up, so it may try again soon.
+function spell.landed(caster, target, state)
+    return require(magicUtilPath).dispelWorthyCount(target) < (state.dispelWorthAtCast or 0)
 end
 
 return spell

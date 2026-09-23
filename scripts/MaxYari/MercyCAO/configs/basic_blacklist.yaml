@@ -32,7 +32,9 @@ full_disable:
     - bird
   cellIds:
     - exampleCellIdA
-    - exampleCellIdB
+    - exampleCellIdB   
+    - "ald marak, kogotel"
+    - "roa dyr, hall of judgement"
 
 surrender_disable:
   recordIds:

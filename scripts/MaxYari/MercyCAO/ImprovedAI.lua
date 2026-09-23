@@ -742,17 +742,24 @@ end
 
 -- Resolves one pending check. Returns true once it's settled (hit or miss), false while it's still waiting.
 local function resolveSpellHit(key, pending, now)
+   local definition = magicUtil.CUSTOM_SPELLS[key]
    -- Only within the window: a check left pending when a fight ended mustn't trigger the spell's effect much later
-   local hit = now <= pending.deadline and pending.target:isValid()
-      and (magicUtil.hasActiveSpellFrom(pending.target, pending.spellId, omwself.object)
-         or magicUtil.hasActiveSpell(pending.target, pending.spellId))
+   local hit = false
+   if now <= pending.deadline and pending.target:isValid() then
+      if definition.landed then
+         -- The spell file knows better, e.g. an instant effect that leaves nothing on the target to find
+         hit = definition.landed(omwself.object, pending.target, state)
+      else
+         hit = magicUtil.hasActiveSpellFrom(pending.target, pending.spellId, omwself.object)
+            or magicUtil.hasActiveSpell(pending.target, pending.spellId)
+      end
+   end
    if not hit and now < pending.deadline then return false end
 
    if hit then
       state.customSpellMisses[key] = 0
       magicUtil.log(key, "hit - stays on cooldown")
       -- The spell's own effect code, from its file in scripts/spells
-      local definition = magicUtil.CUSTOM_SPELLS[key]
       if definition.onHit then definition.onHit(omwself.object, pending.target, state) end
       return true
    end
@@ -949,6 +956,7 @@ local function prepareMagic()
    -- The trees just stop being run when a fight ends, so a branch can be left part way through with the flag set.
    -- Clearing it here means a new fight never starts with magic locked out.
    state.inAttackSequence = false
+   magicUtil.osscResetHold()
    scanOwnMagic()
 
    local actorSpells = types.Actor.spells(omwself)
@@ -1070,6 +1078,8 @@ local function STARTEVERYTHING(BTJsonData)
    -- Rndomising key npc factors
    luaRandom:randomseed(gutils.stringToHash(omwself.recordId))
    randomiseInclinations()
+   -- What the actor's own spells cost, read now while no fight is on (see scanOwnMagic)
+   scanOwnMagic()
 
    -- Patience is rolled once, a loaded game keeps the saved one
    if state.warnsLeft == nil then state.warnsLeft = math.random(1, 3) end
@@ -1695,6 +1705,9 @@ local eventHandlers = {
       state.itemDumpExclusions = blacklist.item_dump_disable.recordIdsMap
       state.customSpells = e.customSpells or {}
       STARTEVERYTHING(e.b3projectJson)
+      -- Combat targets otherwise only arrive when they change: an NPC already fighting when Mercy starts on it (a save
+      -- loaded mid-fight, or startup reaching it a few frames into a fight) would be left to vanilla AI for that fight
+      if I.MSS and I.MSS.getCombatTargets then onTargetsChanged({ targets = I.MSS.getCombatTargets() }) end
    end,
    FriendDamaged = function(...)
       Events:emit("FriendDamaged", ...)

@@ -13,6 +13,9 @@
 --   incompatibleWith  Keys of spells this one isn't picked together with (optional)
 --   record         Spell record fields for core.magic.spells.createRecordDraft
 --   onCast(caster, target, state)  Optional, runs in the caster's local script when Mercy releases the spell
+--   landed(caster, target, state)  Optional, replaces the usual hit check (the spell showing up among the target's
+--                                  active spells) for a target spell that leaves nothing there to find, e.g. an
+--                                  instant effect; checked every frame of the hit window, returns true once it landed
 --   onHit(caster, target, state)   Optional, runs in the caster's local script when a target spell is seen landing
 --                                  'state' is the caster's behaviour tree state: setting state.combatState switches it
 --                                  to another behaviour, e.g. RETREAT or HIDE

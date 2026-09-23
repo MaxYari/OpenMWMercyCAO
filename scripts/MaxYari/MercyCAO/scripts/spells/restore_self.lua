@@ -44,7 +44,7 @@ local spell = {
     character_type = CHARACTER.All,
     weight = 1,
     prewarm = 2,
-    cooldown = 3,
+    cooldown = 6,
     record = {
         name = "Mending",
         type = core.magic.SPELL_TYPE.Spell,
@@ -59,16 +59,17 @@ local spell = {
     },
 }
 
--- Caster's local script, every combat frame. Leaves state.selfNeedsMending for the tree, checked at SCAN_PERIOD.
+-- Caster's local script, every combat frame. Leaves state.selfNeedsMending for the tree, checked at SCAN_PERIOD and
+-- only while the spell is off cooldown. Not gated on the full canCastCustom: that fails during every attack burst, and
+-- the answer has to be fresh for the moment right after one, when the tree gets to its spells.
 function spell.combatUpdate(state)
     local now = core.getSimulationTime()
     if now < (state.mendScanAt or 0) then return end
-    if not state:canCastCustom(spell.key) then
+    state.mendScanAt = now + SCAN_PERIOD
+    if (state.customSpellCooldowns[spell.key] or 0) > now then
         state.selfNeedsMending = false
-        state.mendScanAt = now + SCAN_PERIOD
         return
     end
-    state.mendScanAt = now + SCAN_PERIOD
 
     local me = actor()
     for _, attribute in ipairs(WATCHED) do

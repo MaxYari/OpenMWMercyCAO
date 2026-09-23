@@ -67,7 +67,9 @@ end
 
 -- On combat start. 'firstFightCaster': this is the actor's first fight and it's a spellcaster (or was upgraded to one).
 -- 'combatSpellCost': cheapest vanilla combat spell cost, 'customSpellIds': Mercy spells it knows.
-function module.onCombatStart(actor, chance, firstFightCaster, combatSpellCost, customSpellIds)
+-- 'rng' (optional) is the NPC's seeded roller, so how many potions an NPC gets is the same in every playthrough
+function module.onCombatStart(actor, chance, firstFightCaster, combatSpellCost, customSpellIds, rng)
+    rng = rng or math.random
     cheapestCost = combatSpellCost
     for _, spellId in ipairs(customSpellIds) do
         local spell = core.magic.spells.records[spellId]
@@ -79,7 +81,7 @@ function module.onCombatStart(actor, chance, firstFightCaster, combatSpellCost, 
     if firstFightCaster then
         local count = 0
         for _ = 1, POTION_ROLLS do
-            if math.random() < chance then count = count + 1 end
+            if rng() < chance then count = count + 1 end
         end
         if count > 0 then
             local level = types.Actor.stats.level(actor).current

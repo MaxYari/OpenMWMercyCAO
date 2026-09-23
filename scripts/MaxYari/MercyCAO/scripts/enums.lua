@@ -20,9 +20,9 @@ local COMBAT_STATE = {
 
 -- What kind of character an NPC is, e.g. for who gets which of Mercy's custom spells. All matches any of them.
 local CHARACTER_TYPE = {
-    Spellcaster = "Spellcaster", -- Knows spells
-    Marksman = "Marksman",       -- Knows no spells, carries a marksman weapon
-    Melee = "Melee",             -- Knows no spells, no marksman weapon
+    Spellcaster = "Spellcaster", -- A spellcaster by class (gutils Actor:isSpellCaster)
+    Marksman = "Marksman",       -- Not a spellcaster by class, carries a marksman weapon
+    Melee = "Melee",             -- Not a spellcaster by class, no marksman weapon
     All = "All"
 }
 

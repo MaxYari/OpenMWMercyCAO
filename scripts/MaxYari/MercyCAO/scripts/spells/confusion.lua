@@ -50,6 +50,7 @@ local confusedUntil = 0
 local confusionSpellId = nil
 local nextDispelCheckAt = 0
 local shader = nil
+local shaderLoaded = false -- Tried loading it: with post processing off (or the shader failing) there's none
 local shaderOn = false
 
 spell.targetEventHandlers = {
@@ -61,11 +62,17 @@ spell.targetEventHandlers = {
         confusedUntil = math.max(confusedUntil, now + data.duration)
         confusionSpellId = data.spellId
         nextDispelCheckAt = now + DISPEL_CHECK_PERIOD
-        if not shader then shader = require('openmw.postprocessing').load(SHADER) end
-        if not shaderOn then
-            shader:setFloat("uStrength", 0)
-            shader:enable()
-            shaderOn = true
+        -- The screen effect is optional: without it the walking is still inverted
+        if not shaderLoaded then
+            shaderLoaded = true
+            local ok, loaded = pcall(function() return require('openmw.postprocessing').load(SHADER) end)
+            shader = ok and loaded or nil
+        end
+        if shader and not shaderOn then
+            shaderOn = pcall(function()
+                shader:setFloat("uStrength", 0)
+                shader:enable()
+            end)
         end
     end,
 }
@@ -89,7 +96,9 @@ function spell.playerFrame()
         end
         return
     end
-    shader:setFloat("uStrength", math.min(1, (now - confusedSince) / FADE_IN, (confusedUntil - now) / FADE_OUT))
+    if shaderOn then
+        shader:setFloat("uStrength", math.min(1, (now - confusedSince) / FADE_IN, (confusedUntil - now) / FADE_OUT))
+    end
     local controls = require('openmw.self').controls
     controls.movement = -controls.movement
     controls.sideMovement = -controls.sideMovement
