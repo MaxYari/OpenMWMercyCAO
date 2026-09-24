@@ -57,7 +57,7 @@ local function parseNode(node, treeData, projectData, pdCb)
     -- If this node is an embeded tree - switch to that
     local embededTree = findTree(node.name, projectData)
     if embededTree then
-        print("Detected EMBEDED tree " .. embededTree.title .. " switching to that!")
+        -- print("Detected EMBEDED tree " .. embededTree.title .. " switching to that!")
         return parseNode(embededTree.nodes[embededTree.root], embededTree, projectData, pdCb)
     end
 
