@@ -56,8 +56,13 @@ local function VanillaBehavior(config)
     config.start = function(task, state)
         state.vanillaBehavior = true
         task.endsAt = nil
+        task.startedAt = core.getSimulationTime()
         if p.duration then
-            task.endsAt = core.getSimulationTime() + p.duration()
+            task.endsAt = task.startedAt + p.duration()
+        end
+        if magicUtil.DEBUG_LOGGING then
+            magicUtil.log(config.name, "engine window opens", task.endsAt and string.format("(%.1f s)", p.duration())
+                or "(until the branch ends)", "| stance", state.detStance)
         end
     end
 
@@ -65,10 +70,14 @@ local function VanillaBehavior(config)
         state.vanillaBehavior = true
         if task.endsAt then
             if p.endOnStance and state.detStance == p.endOnStance() then
-                magicUtil.log(config.name, "the engine switched to", state.detStance, "stance")
+                magicUtil.log(config.name, "engine window closes: the engine switched to", state.detStance, "stance")
                 return task:success()
             end
             if core.getSimulationTime() >= task.endsAt and not engineBusy(state) then
+                if magicUtil.DEBUG_LOGGING then
+                    magicUtil.log(config.name, "engine window closes after",
+                        string.format("%.1f s", core.getSimulationTime() - task.startedAt), "| stance", state.detStance)
+                end
                 return task:success()
             end
         end

@@ -82,6 +82,8 @@ local function say(actor, targetActor, recordType, force)
     if not actor then
         error("Say was called without an actor")
     end
+    -- Debug: Mercy's own voice lines (a combat line with no such log entry came from the engine)
+    require("scripts/MaxYari/MercyCAO/scripts/magic_util").log("Mercy voice line:", recordType, force and "(forced)" or "")
 
     local wActor = gutils.Actor:new(actor)
 

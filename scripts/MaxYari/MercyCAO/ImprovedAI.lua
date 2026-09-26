@@ -118,7 +118,7 @@ local state = {
    combatState = enums.COMBAT_STATE.NO_STATE,
    navService = navService,
    attackGroup = nil,
-   staggerGroup = nil,
+   staggerGroup = nil,      -- One of the engine's hit animations still playing (see isEngineHitGroup), nil when free
    dt = 0,
    reach = 140,
    locomotion = nil,
@@ -695,9 +695,11 @@ local pitchSteered = false -- Pitch was changed while aiming and may still need 
 -- Debug logging of who drives the actor in combat and its stance, logged only when they change
 local lastControlOwner = nil
 local lastLoggedStance = nil
-local function noteControlOwner(owner, stance)
+-- 'detail' (optional) is logged with the change but not compared, so a detail that changes every frame doesn't spam
+local function noteControlOwner(owner, stance, detail)
    if owner ~= lastControlOwner then
-      magicUtil.log("Control:", lastControlOwner or "-", "->", owner, "| stance", stance)
+      magicUtil.log("Control:", lastControlOwner or "-", "->", owner, detail and ("(" .. detail .. ")") or "",
+         "| stance", stance)
       lastControlOwner = owner
    end
 end
@@ -1096,6 +1098,21 @@ end
 
 -- Main update function (finally) --
 ------------------------------------
+-- The engine's hit states, by the animation it plays for them: a stagger ("hit1".."hitN", "swimhit1".., numbered
+-- because the engine picks a random variant) or a knockdown / knockout (named as they are). While one plays the
+-- engine won't start an attack (CharacterController::readyToStartAttack), so neither does Mercy's tree. Checked by
+-- exact name: other mods' flinches layered on a hit ("hitreact1" from Hit Reactions Animated) aren't a stagger - the
+-- engine still attacks through them - and a mod replacing the stagger's look (Brutal Staggers) keeps the engine's
+-- animation running underneath, so that's still the one to follow.
+local ENGINE_KNOCK_GROUPS = { knockdown = true, knockout = true, swimknockdown = true, swimknockout = true }
+local function isEngineHitGroup(groupname)
+   return ENGINE_KNOCK_GROUPS[groupname] or string.match(groupname, "^hit%d+$") ~= nil
+      or string.match(groupname, "^swimhit%d+$") ~= nil
+end
+-- Every engine hit animation that started and hasn't been seen to stop: a new hit can start while another plays, and
+-- the NPC is staggered until the last of them is over. Cleaned up in the main loop.
+local engineHitGroups = {}
+
 local function onUpdate(dt)
    if dt <= 0 then return end
 
@@ -1128,6 +1145,9 @@ local function onUpdate(dt)
    -- Short circuit out of here if not in Combat state, this is done for the sake of optimisation since currently any access to
    -- lua API is prone to excessive memory allocations.
    if activeAiPackage.type ~= "Combat" then
+      if lastAiPackage.type == "Combat" then
+         magicUtil.log("COMBAT ENDED - vanilla AI takes over | stance", selfActor:getDetailedStance())
+      end
       state.combatState = enums.COMBAT_STATE.NO_STATE
       lastAiPackage = activeAiPackage
       enableAI(true)
@@ -1174,6 +1194,7 @@ local function onUpdate(dt)
    -- Should we control character with Mercy?
    -- If we are not in a combat state - the engine will handle AI
    local shouldOverrideAI = true
+   local fallbackReason = nil -- Debug logging: why Mercy hands the actor to vanilla AI this frame
    local detStance = selfActor:getDetailedStance()
    if detStance ~= lastLoggedStance then
       magicUtil.log("Stance:", lastLoggedStance or "-", "->", detStance)
@@ -1181,6 +1202,7 @@ local function onUpdate(dt)
    end
    if activeAiPackage.type ~= "Combat" or not enemyActor or types.Actor.isDead(enemyActor) or selfActor:isDead() then
       shouldOverrideAI = false
+      fallbackReason = "no live enemy or dead"
    end
    -- Spellcasters are handed to the engine in short windows from the tree (Magic Window, see canHandOverForMagic)
    -- A small grace period when an empty target is detected in a cobat package. Allows engine to clean up.
@@ -1199,6 +1221,7 @@ local function onUpdate(dt)
    end) ]]
    if notargetDetectedAt and now - notargetDetectedAt <= notargetGracePeriod then
       shouldOverrideAI = false
+      fallbackReason = "invalid target grace"
    else
       notargetDetectedAt = nil
    end
@@ -1229,6 +1252,7 @@ local function onUpdate(dt)
 
    -- When we switch to combat - determine if we want to be hesitant (stand ground) or engage right away
    if lastAiPackage.type ~= activeAiPackage.type and activeAiPackage.type == "Combat" then
+      magicUtil.log("COMBAT STARTED with", enemyActor and enemyActor.recordId or "no enemy", "| stance", detStance)
       prepareMagic()
       -- Initialising combat state
       if enemyActor then                 
@@ -1304,6 +1328,7 @@ local function onUpdate(dt)
    -- if we are not doing Mercy-style fleeing/surrender, but the flee value is >= 100 - then fallback to vanilla flee
    if state.combatState ~= enums.COMBAT_STATE.RETREAT and state.combatState ~= enums.COMBAT_STATE.MERCY and fleeValue >= 100 then
       shouldOverrideAI = false
+      if magicUtil.DEBUG_LOGGING then fallbackReason = "flee value " .. tostring(fleeValue) end
    end
 
    -- if we can't find a nav path to enemy - fallback to vanilla behaviour. Not while warning or hiding: those don't chase,
@@ -1312,6 +1337,12 @@ local function onUpdate(dt)
       state.navService:setTargetPos(enemyActor.position)
       if state.combatState ~= enums.COMBAT_STATE.STAND_GROUND and state.combatState ~= enums.COMBAT_STATE.HIDE and (#state.navService.path == 0 or (state.range and (state.navService.path[#state.navService.path] - enemyActor.position):length() > state.range)) then
          shouldOverrideAI = false
+         if magicUtil.DEBUG_LOGGING then
+            local path = state.navService.path
+            fallbackReason = #path == 0 and "no path to enemy" or string.format(
+               "path ends too far from enemy: %.0f from it, I'm %.0f from it (path points %d)",
+               (path[#path] - enemyActor.position):length(), state.range or -1, #path)
+         end
       end
    end
 
@@ -1324,6 +1355,7 @@ local function onUpdate(dt)
       -- if we are not doing mercy-style retreat - fallback to vanilla behaviour
       if state.combatState == enums.COMBAT_STATE.FIGHT then
          shouldOverrideAI = false
+         fallbackReason = "enemy invisible"
       end
    end
 
@@ -1334,7 +1366,7 @@ local function onUpdate(dt)
    -- Disabling AI so everything can be controlled by ~Mercy~
    enableAI(not shouldOverrideAI)
    if not shouldOverrideAI then
-      noteControlOwner("vanilla (fallback)", detStance)
+      noteControlOwner("vanilla (fallback)", detStance, fallbackReason)
       return
    end
 
@@ -1390,9 +1422,16 @@ local function onUpdate(dt)
       state.attackState = enums.ATTACK_STATE.NO_STATE
    end
 
-   -- And the same for stagger state
-   if state.staggerGroup and not animManager.isPlaying(state.staggerGroup) then
+   -- And the same for stagger state: staggered while any of the engine's hit animations is still playing
+   if state.staggerGroup then
       state.staggerGroup = nil
+      for groupname in pairs(engineHitGroups) do
+         if animManager.isPlaying(groupname) then
+            state.staggerGroup = groupname
+         else
+            engineHitGroups[groupname] = nil
+         end
+      end
    end
 
    -- Check for going ham. I.e spamming attack in response to player's attack spam.
@@ -1448,6 +1487,7 @@ local function onUpdate(dt)
    else
       noteControlOwner("mercy", detStance)
       if state.stance ~= selfActor:getStance() then
+         magicUtil.log("Mercy sets stance", selfActor:getStance(), "->", state.stance, "| combat state", state.combatState)
          selfActor:setStance(state.stance)
       end
       omwself.controls.run = state.run
@@ -1513,14 +1553,29 @@ end
 -----------------------------------------------------------------------------------
 
 -- Animation groups the Consuming Animated mod plays on NPCs (see its potionanim_shared.lua)
+-- Movement and idle groups, left out of the debug log of animations started during a fight
+local DEBUG_QUIET_GROUPS = {}
+for _, prefix in ipairs({ "walk", "run", "sneak", "turn", "swim", "idle", "jump" }) do
+   for _, suffix in ipairs({ "", "forward", "back", "left", "right", "1h", "2c", "2w", "hh", "sp", "spell", "swim",
+      "storm", "crossbow", "1", "2", "3", "4", "5", "6", "7", "8", "9" }) do
+      DEBUG_QUIET_GROUPS[prefix .. suffix] = true
+   end
+end
+
 local CONSUMING_ANIMATED_GROUPS = { potionl = true, eatingr = true, bugmusk2 = true, drinkbone = true, smokepipe1 = true,
    skoomapipe = true, smoke1r = true }
 
 I.AnimationController.addPlayBlendedAnimationHandler(function(groupname, options)
    --print("New animation started! " .. groupname .. " : " .. options.startkey .. " --> " .. options.stopkey)
-   -- Detect being staggered
-   if gutils.stringStartsWith(groupname, "hit") then
+   -- Detect being staggered: the engine's own hit animations only (see isEngineHitGroup)
+   if isEngineHitGroup(groupname) then
+      engineHitGroups[groupname] = true
       state.staggerGroup = groupname
+   end
+   -- Debug: every animation started during a fight (movement and idles left out), with who drives the actor
+   if magicUtil.DEBUG_LOGGING and activeAiPackage.type == "Combat" and not DEBUG_QUIET_GROUPS[groupname] then
+      magicUtil.log("Anim start:", groupname, "|", tostring(options and options.startKey), "->",
+         tostring(options and options.stopKey), "| stance", selfActor:getStance(), "| driver", lastControlOwner or "-")
    end
    -- Debug: drinking and eating animations from Consuming Animated, to see whether they get in the way of casting
    if CONSUMING_ANIMATED_GROUPS[groupname] then
@@ -1578,6 +1633,11 @@ end)
 -- In the text key handler: Theres no way to know for which bonegroup the text key was triggered?
 I.AnimationController.addTextKeyHandler(nil, function(groupname, key)
    --print("Animation text key! " .. groupname .. " : " .. key)
+   -- Debug: weapon and spell hands being drawn or put away during a fight
+   if magicUtil.DEBUG_LOGGING and activeAiPackage.type == "Combat" and string.find(key, "equip") then
+      magicUtil.log("Anim key:", groupname, "|", key, "| stance", selfActor:getStance(), "| driver",
+         lastControlOwner or "-")
+   end
    -- "shoot start" is a bow, crossbow or thrown weapon: without it a draw only showed up once it reached "min attack"
    if string.find(key, "chop start") or string.find(key, "thrust start") or string.find(key, "slash start")
       or string.find(key, "shoot start") then
@@ -1679,6 +1739,20 @@ end
 local function onTargetsChanged(e)
    combatTargets = e.targets
    if not combatTargets then combatTargets = {} end
+   if magicUtil.DEBUG_LOGGING then
+      local ids = {}
+      for _, target in ipairs(combatTargets) do ids[#ids + 1] = target.recordId end
+      magicUtil.log("Combat targets now:", #ids > 0 and table.concat(ids, ", ") or "none")
+      -- Combat gone: which packages are left, i.e. what replaced it (another mod starting a package with the default
+      -- cancelOther = true wipes Combat)
+      if #ids == 0 then
+         local packages = {}
+         AI.forEachPackage(function(package) packages[#packages + 1] = package.type end)
+         local active = AI.getActivePackage()
+         magicUtil.log("  AI packages now:", #packages > 0 and table.concat(packages, ", ") or "none", "| active:",
+            active and active.type or "none")
+      end
+   end
 
    if next(combatTargets) then
       -- Update ai package
