@@ -1,7 +1,7 @@
 -- Mercy's custom spells, one file each. To add a spell, add its file to this list. Fields a spell file returns:
 --   key            Unique name, used by the tree ($:canCastCustom("key")) and the "luamercy" console command
 --   version        Bump after changing 'record', so saved games get the new record
---   bundle         "normal", "aux" or "exotic", see magic_util.rollCustomSpells
+--   bundle         "normal", "exotic" or "counter", see magic_util.rollCustomSpells
 --   weight         Pick weight within the bundle
 --   minLevel       Lowest NPC level that can get the spell from the distribution (optional)
 --   playerTargetOnly  Only ever cast at the player, not at NPCs or creatures (optional)

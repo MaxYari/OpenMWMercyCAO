@@ -118,7 +118,7 @@ I.Settings.registerGroup {
                 max = 1,
             },
             name = 'Spellcaster Custom Spells Chance',
-            description = 'A probability (in 0 - 1 range) that a spellcaster NPC gets Mercy\'s custom spells. An NPC counts as a spellcaster by its class: a magic school among its major skills, or being a vampire.',
+            description = 'A probability (in 0 - 1 range) that a spellcaster NPC gets Mercy\'s custom spells.',
         },
         {
             key = 'SpellcasterUpgradeChance',
@@ -129,7 +129,7 @@ I.Settings.registerGroup {
                 max = 1,
             },
             name = 'Non-Caster Custom Spells Chance',
-            description = 'A probability (in 0 - 1 range) that an NPC who isn\'t a spellcaster by class still gets Mercy\'s custom spells, becoming a spellcaster.',
+            description = 'A probability (in 0 - 1 range) that a non-spellcaster NPC is upgraded to a spellcaster.',
         },
         {
             key = 'ExtraSpellsForHighLevelCasters',

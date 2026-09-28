@@ -97,8 +97,8 @@ local navService = NavigationService({
 -- Actor type variables
 local spellCastersAreVanilla = true
 local isGuard = selfActor:isAGuard()
--- Casts by class (a casting major skill, or a vampire). Only these and the NPCs Mercy upgrades get engine magic
--- windows, see prepareMagic.
+-- Has a casting class (a magic school among its major skills, or a vampire). A spellcaster also has to know spells of
+-- its own, see prepareMagic.
 local isSpellCaster = selfActor:isSpellCaster()
 -- Data containers
 local bTrees = nil
@@ -689,8 +689,6 @@ local retreatedOnce = false
 local askedForMercyOnce = false
 -- Custom spells rolled on the first fight: key -> learned spell record id, or false. nil until rolled. Saved.
 local learnedCustomSpells = nil
--- This NPC knew no spells and Mercy made a caster of it on its first fight. Saved, so it keeps its magic windows.
-local upgradedToCaster = false
 local pitchSteered = false -- Pitch was changed while aiming and may still need levelling
 -- Debug logging of who drives the actor in combat and its stance, logged only when they change
 local lastControlOwner = nil
@@ -924,13 +922,27 @@ local function learnConsoleSpells()
    end
 end
 
--- The actor's own spells as Mercy last saw them in full (magic_util.scanCastables), for what they cost: the Magic
--- Window checks it can afford one, mana potions are drunk when it can't. OSSC strips an actor's spells from its list
--- while it runs the actor's casting in a fight, so a scan at combat start can come back empty for a mage. The richest
--- scan of the session is kept instead, starting with one made when Mercy starts on the actor (almost always out of
--- combat, before OSSC can have stripped anything). Whether the actor is a spellcaster doesn't come from here at all:
--- that's its class (isSpellCaster), which nothing can strip.
-local spellScan = nil
+-- What makes an NPC itself for seeding: its record and where it started. No two NPCs start at the same spot, and the
+-- spot is the same in every save and every playthrough - a leveled-list spawn gets its spawn point's placement, so a
+-- respawn there rolls the same too. Nothing seeded is saved: it's re-derived from this on every load.
+local function npcSeedKey()
+   local cell, pos = omwself.startingCell, omwself.startingPosition
+   if not (cell and pos) then return omwself.recordId end
+   return string.format("%s|%s|%d|%d|%d", omwself.recordId, cell.id, math.floor(pos.x + 0.5), math.floor(pos.y + 0.5),
+      math.floor(pos.z + 0.5))
+end
+
+-- The rolls that decide an NPC's magic - whether it gets Mercy's spells, which ones, how many potions - have a stream of
+-- their own, seeded per NPC (guards too): copies of one record roll separately, and these rolls can't shift the
+-- inclinations stream (luaRandom) or be shifted by it. Seeded in STARTEVERYTHING.
+local magicRandom = setmetatable({ a = 1103515245, c = 12345, m = 0x10000, x = 0 }, getmetatable(luaRandom))
+local function magicRoll()
+   return magicRandom:random()
+end
+
+-- The actor's own spells (magic_util.scanCastables): whether it knows any, and what they cost - the Magic Window checks it
+-- can afford one, mana potions are drunk when it can't. OSSC takes an actor's spells out of its list while it runs the
+-- actor's casting, so the scan is done with them put back for the instant (magic_util.withOSSCSpellsRestored).
 local function scanOwnMagic()
    -- Mercy's own spells don't count, old records of them (from before a version bump) included
    local ignored = {}
@@ -938,20 +950,13 @@ local function scanOwnMagic()
    for _, spellId in pairs(learnedCustomSpells or {}) do
       if spellId then ignored[spellId] = true end
    end
-   local scan = magicUtil.scanCastables(omwself, ignored)
-   if not spellScan or scan.combatSpellCount > spellScan.combatSpellCount then spellScan = scan end
-   -- Items aren't touched by OSSC and can change between fights: those always come from the fresh scan
-   state.castables = {
-      knownSpellCount = spellScan.knownSpellCount,
-      combatSpellCount = spellScan.combatSpellCount,
-      cheapestSpellCost = spellScan.cheapestSpellCost,
-      hasItems = scan.hasItems,
-      canUseMagic = spellScan.combatSpellCount > 0 or scan.hasItems,
-   }
+   state.castables = magicUtil.withOSSCSpellsRestored(function()
+      return magicUtil.scanCastables(omwself, ignored)
+   end)
 end
 
--- On combat start: work out what magic the actor has, and on its first fight let a spellcaster - by class, see
--- isSpellCaster - learn Mercy's custom spells, or upgrade a non-caster into one
+-- On combat start: work out what magic the actor has, and on its first fight let a spellcaster learn Mercy's custom
+-- spells, or upgrade a non-caster into one
 local function prepareMagic()
    lastControlOwner = nil
    pendingSpellHits = {}
@@ -960,13 +965,15 @@ local function prepareMagic()
    state.inAttackSequence = false
    magicUtil.osscResetHold()
    scanOwnMagic()
+   -- A spellcaster has a casting class and knows spells of its own (Mercy's don't count)
+   local isCaster = isSpellCaster and state.castables.knownSpellCount > 0
 
    local actorSpells = types.Actor.spells(omwself)
    local firstFightCaster = false
    -- For the custom spell distribution: its level and what kind of character it is
    local function distributionNpc()
       local characterType = enums.CHARACTER_TYPE.Melee
-      if isSpellCaster then
+      if isCaster then
          characterType = enums.CHARACTER_TYPE.Spellcaster
       else
          for _, weapon in ipairs(types.Actor.inventory(omwself):getAll(types.Weapon)) do
@@ -979,28 +986,28 @@ local function prepareMagic()
       magicUtil.log("Custom spell distribution: level", selfActor:levelStat().current, characterType)
       return { level = selfActor:levelStat().current, characterType = characterType,
          extraSpellRolls = extraSpellsForHighLevelCasters,
-         -- Seeded from the record id, so which spells this NPC gets is the same in every playthrough
-         rng = function() return luaRandom:random() end }
+         rng = magicRoll }
    end
-   if pendingConsoleSpells and (not pendingConsoleSpells.next or isSpellCaster) then
+   if pendingConsoleSpells and (not pendingConsoleSpells.next or isCaster) then
       learnConsoleSpells()
    elseif not learnedCustomSpells then
-      if isSpellCaster then
+      if isCaster then
          firstFightCaster = true
-         if luaRandom:random() < casterCustomSpellsChance then
+         if magicRoll() < casterCustomSpellsChance then
             learnCustomSpells(magicUtil.rollCustomSpells(distributionNpc()))
          else
             learnCustomSpells({})
             magicUtil.log("Spellcaster not picked for custom spells")
          end
-      elseif luaRandom:random() < nonCasterCustomSpellsChance then
-         firstFightCaster = true
-         upgradedToCaster = true
-         magicUtil.log("Not a spellcaster by class, upgraded to one")
-         learnCustomSpells(magicUtil.rollCustomSpells(distributionNpc()))
+      elseif magicRoll() < nonCasterCustomSpellsChance then
+         local keys = magicUtil.rollCustomSpells(distributionNpc())
+         learnCustomSpells(keys)
+         -- Too low a level for any of the spells: it stays a non-caster, and gets no magicka potions either
+         firstFightCaster = #keys > 0
+         magicUtil.log("Not a spellcaster,", firstFightCaster and "upgraded to one" or "picked for an upgrade but too low a level")
       else
          learnedCustomSpells = {}
-         magicUtil.log("Not a spellcaster by class, gets no custom spells")
+         magicUtil.log("Not a spellcaster, gets no custom spells")
       end
    else
       -- The global script recreates a custom spell when its definition changes: swap the old record for the new one
@@ -1019,10 +1026,11 @@ local function prepareMagic()
    end
    updateSpellCombatUpdates()
 
-   -- Handing the actor to the engine to pick a spell (the Magic Window) is only for spellcasters: NPCs whose class
-   -- casts, and the ones Mercy upgraded into casters. Knowing a single combat spell doesn't make a bandit a mage, and
-   -- the handover cost it its melee rhythm. Decided after the upgrade roll above, so a fresh upgrade counts.
-   if not isSpellCaster and not upgradedToCaster and state.castables.canUseMagic then
+   -- Handing the actor to the engine to pick a spell (the Magic Window) is only for spellcasters and the NPCs Mercy
+   -- upgraded into them - not a spellcaster, but it has Mercy's spells. Decided after the rolls above, so a fresh upgrade
+   -- counts.
+   local upgraded = not isCaster and learnedCustomSpells ~= nil and next(learnedCustomSpells) ~= nil
+   if not isCaster and not upgraded and state.castables.canUseMagic then
       magicUtil.log("Not a spellcaster by class: no engine magic windows")
       state.castables.canUseMagic = false
    end
@@ -1032,7 +1040,7 @@ local function prepareMagic()
       if known and magicUtil.isAvailable(key) then knownCustomSpellIds[#knownCustomSpellIds + 1] = state.customSpells[key] end
    end
    manaPotions.onCombatStart(omwself.object, manaPotionChance, firstFightCaster, state.castables.cheapestSpellCost,
-      knownCustomSpellIds, function() return luaRandom:random() end)
+      knownCustomSpellIds, magicRoll)
 
    -- Some spells stay unused for a while after a fight starts
    local now = core.getSimulationTime()
@@ -1078,7 +1086,11 @@ local function STARTEVERYTHING(BTJsonData)
    -- Ready to use! -----------------------------------------------------------
 
    -- Rndomising key npc factors
-   luaRandom:randomseed(gutils.stringToHash(omwself.recordId))
+   -- Guards are seeded by their record, so every guard of a kind behaves the same (all Hlaalu guards jump); everyone
+   -- else by npcSeedKey, so each NPC is its own. The magic stream is always per NPC.
+   local seedKey = npcSeedKey()
+   luaRandom:randomseed(gutils.stringToHash(isGuard and omwself.recordId or seedKey))
+   magicRandom:randomseed(gutils.stringToHash(seedKey .. "|magic"))
    randomiseInclinations()
    -- What the actor's own spells cost, read now while no fight is on (see scanOwnMagic)
    scanOwnMagic()
@@ -1830,14 +1842,12 @@ return {
             aiEnabled and "engine" or "mercy", "| stance", selfActor:getDetailedStance())
       end,
       onSave = function()
-         return { warnsLeft = state.warnsLeft, learnedCustomSpells = learnedCustomSpells,
-            upgradedToCaster = upgradedToCaster, manaPotions = manaPotions.save() }
+         return { warnsLeft = state.warnsLeft, learnedCustomSpells = learnedCustomSpells, manaPotions = manaPotions.save() }
       end,
       onLoad = function(data)
          if data then
             state.warnsLeft = data.warnsLeft
             learnedCustomSpells = data.learnedCustomSpells
-            upgradedToCaster = data.upgradedToCaster == true
             manaPotions.load(data.manaPotions)
          end
       end,

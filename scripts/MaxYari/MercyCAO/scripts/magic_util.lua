@@ -260,6 +260,19 @@ function module.osscCast(spellId, target)
     return true
 end
 
+-- Runs fn with the actor's spells all in its list, and returns what fn returns. OSSC takes an actor's castable spells out
+-- of its list while it runs the actor's casting (so the engine can't cast them too) and puts them back while paused - so
+-- for this instant it's paused under a reason of Mercy's own and let go again, and it strips them again on its next
+-- update. A pause also ends a quick-cast in flight, so this is only for moments OSSC isn't casting, like a fight's start.
+function module.withOSSCSpellsRestored(fn)
+    local caster = module.osscCaster()
+    if caster then caster.pause("MercyCAO_scan") end
+    local ok, result = pcall(fn)
+    if caster then caster.unpause("MercyCAO_scan") end
+    if not ok then error(result, 0) end
+    return result
+end
+
 -- Hold or release OSSC's own quick-casting for this actor. Mercy holds it under its own reason, so a hold another
 -- mod is keeping isn't released by Mercy letting go of its own.
 local osscPaused = false
@@ -290,9 +303,9 @@ end
 -- Custom spells ---------------------------------------------------------------------------------------------------
 -- Mercy's own spells, each in its own file in scripts/spells. The global script creates a record for each once per game
 -- (records are saved with the game)
--- and again whenever its 'version' changes; bump 'version' after changing a record. Spellcasters (by class) get some of
--- them on their first fight, and some other NPCs too, becoming spellcasters (see rollCustomSpells); they swap to newer
--- records later.
+-- and again whenever its 'version' changes; bump 'version' after changing a record. Spellcasters get some of them on
+-- their first fight, and some other NPCs too, becoming spellcasters (see rollCustomSpells); they swap to newer records
+-- later.
 --
 -- A custom spell goes on its cooldown ('cooldown', or CUSTOM_SPELL_DEFAULT_COOLDOWN) when cast. A miss (a target spell
 -- not landing within the main loop's hit window) lifts the cooldown, unless it's CUSTOM_SPELL_MISSES_BEFORE_COOLDOWN
@@ -305,23 +318,21 @@ end
 module.CUSTOM_SPELL_DEFAULT_COOLDOWN = 20
 module.CUSTOM_SPELL_MISSES_BEFORE_COOLDOWN = 2
 
--- Distribution: whether an NPC takes part at all is rolled by the NPC script, with separate settings for spellcasters by
--- class and for other NPCs (see rollCustomSpells). A taking part NPC rolls the exotic bundle (EXOTIC_BUNDLE_CHANCE). With
+-- Distribution: whether an NPC takes part at all is rolled by the NPC script, with separate settings for spellcasters and
+-- for other NPCs (see rollCustomSpells). A taking part NPC rolls the exotic bundle (EXOTIC_BUNDLE_CHANCE). With
 -- MAGIC_AND_EXOTIC_COMBO_CHANCE it gets a spell from the normal bundle, plus one from the exotic bundle if that roll
 -- succeeded; otherwise it gets a spell from the exotic bundle if that roll succeeded, or else from the normal bundle. An
 -- exotic roll counts as failed when the NPC can't get any exotic spell.
--- Then one from the aux bundle (AUX_BUNDLE_CHANCE), and one from the counterspell bundle (COUNTER_BUNDLE_CHANCE), each
--- rolled on its own. Within a bundle a spell is picked by
+-- Then one from the counterspell bundle (COUNTER_BUNDLE_CHANCE), rolled on its own. Within a bundle a spell is picked by
 -- 'weight': weights summing above 1 are scaled down to 1, below 1 the rest is the chance of picking nothing. A spell isn't
 -- picked if the NPC is below its 'minLevel', if the NPC's character type isn't among its 'character_type', if a spell in
 -- its 'incompatibleWith' list is already picked, or if its 'available' function says it can't be used in this game (e.g.
 -- a mod it needs isn't installed).
 module.EXOTIC_BUNDLE_CHANCE = 0.33
 module.MAGIC_AND_EXOTIC_COMBO_CHANCE = 0.25
-module.AUX_BUNDLE_CHANCE = 0.33
 -- The counterspell bundle is rolled separately from the rest, see rollCustomSpells
 module.COUNTER_BUNDLE_CHANCE = 0.33
--- Spellcasters of this level and above roll the normal / exotic spells twice (aux still once)
+-- Spellcasters of this level and above roll the normal / exotic spells twice (the counterspell bundle still once)
 module.EXTRA_SPELL_ROLL_LEVEL = 16 -- (when npc.extraSpellRolls, from the settings)
 
 -- Spell definitions live in scripts/spells, one file each (see scripts/spells/init.lua for their fields)
@@ -430,7 +441,6 @@ function module.rollCustomSpells(npc)
             pickFrom(exotic and "exotic" or "normal")
         end
     end
-    if npc.rng() < module.AUX_BUNDLE_CHANCE then pickFrom("aux") end
     -- Counterspells are rolled on their own, so an NPC can get one whatever else it ended up with
     if npc.rng() < module.COUNTER_BUNDLE_CHANCE then pickFrom("counter") end
     return picked

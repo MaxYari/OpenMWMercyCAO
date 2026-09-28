@@ -7,8 +7,8 @@ local CHARACTER = require("scripts/MaxYari/MercyCAO/scripts/enums").CHARACTER_TY
 return {
     key = "lightBearer",
     version = 3,
-    bundle = "aux",
-    minLevel = 3,
+    bundle = "normal",
+    minLevel = 8,
     character_type = { CHARACTER.Spellcaster },
     weight = 0.5,
     prewarm = 0,

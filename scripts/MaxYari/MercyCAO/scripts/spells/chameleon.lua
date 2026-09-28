@@ -7,7 +7,7 @@ return {
     key = "chameleon",
     version = 3,
     bundle = "normal",
-    minLevel = 3,
+    minLevel = 8,
     character_type = CHARACTER.All,
     weight = 1,
     prewarm = 0,

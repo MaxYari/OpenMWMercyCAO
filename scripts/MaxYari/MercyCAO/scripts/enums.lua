@@ -20,9 +20,9 @@ local COMBAT_STATE = {
 
 -- What kind of character an NPC is, e.g. for who gets which of Mercy's custom spells. All matches any of them.
 local CHARACTER_TYPE = {
-    Spellcaster = "Spellcaster", -- A spellcaster by class (gutils Actor:isSpellCaster)
-    Marksman = "Marksman",       -- Not a spellcaster by class, carries a marksman weapon
-    Melee = "Melee",             -- Not a spellcaster by class, no marksman weapon
+    Spellcaster = "Spellcaster", -- Has a casting class and knows spells (see prepareMagic in ImprovedAI.lua)
+    Marksman = "Marksman",       -- Not a spellcaster, carries a marksman weapon
+    Melee = "Melee",             -- Not a spellcaster, no marksman weapon
     All = "All"
 }
 
