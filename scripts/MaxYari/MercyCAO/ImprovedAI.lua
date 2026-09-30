@@ -625,7 +625,7 @@ end
 -- Interface ----------------------------------------------------------------
 -----------------------------------------------------------------------------
 local interface = {
-   version = 1.5,
+   version = 1.6,
    enabled = true,
    state = state,
    addExtension = function(treeName, combatState, stance, extensionConfig)
@@ -821,9 +821,32 @@ local enableAI = function (state)
    end
 end
 
+-- Disabling Mercy hands the actor to the engine AI, enabling takes the AI away again until Mercy's next update decides
+-- who drives. Except on an actor Mercy doesn't run on (blacklisted, or not started yet): nothing would give it back.
 interface.setEnabled = function(state)
    interface.enabled = state
-   enableAI(state)
+   enableAI(not state or not bTrees)
+end
+
+-- Other mods switching off parts of Mercy, each under a source name of its own: combat is the Combat and CombatAux
+-- trees (attacks, spells, combat barks), locomotion is the Locomotion tree (movement, and acting out warnings, retreats,
+-- hiding and surrenders). A part stays off while any source keeps it off. Called without arguments, reads whether it's
+-- on.
+local combatBlocks = {}
+local locomotionBlocks = {}
+local function setPartEnabled(blocks, source, enabled)
+   if source ~= nil and enabled ~= nil then
+      blocks[source] = not enabled or nil
+   end
+   return next(blocks) == nil
+end
+
+interface.combatEnabled = function(source, enabled)
+   return setPartEnabled(combatBlocks, source, enabled)
+end
+
+interface.locomotionEnabled = function(source, enabled)
+   return setPartEnabled(locomotionBlocks, source, enabled)
 end
 
 local lastFleeValue = selfActor:aiFleeStat().modified
@@ -1469,9 +1492,19 @@ local function onUpdate(dt)
    -- Running behaviour trees! -----------------------------
    ---------------------------------------------------------
    if bTrees == nil then return error("Behaviour trees are nil, something went wrong on initialisation.") end
-   bTrees["Combat"]:run()
-   bTrees["CombatAux"]:run()
-   bTrees["Locomotion"]:run()
+   local combatOn = next(combatBlocks) == nil
+   if combatOn then
+      bTrees["Combat"]:run()
+      bTrees["CombatAux"]:run()
+   end
+   -- A switched off tree leaves its controls at the frame's defaults: no attack, or standing still facing the enemy
+   if next(locomotionBlocks) == nil then bTrees["Locomotion"]:run() end
+
+   -- With combat switched off the NPC keeps the stance it has, and isn't handed to the engine, which would attack
+   if not combatOn then
+      state.vanillaBehavior = false
+      state.stance = selfActor:getStance()
+   end
 
 
    -- While Mercy casts a custom spell it drives the actor, even if a stance branch wants to hand it to the engine,
@@ -1642,6 +1675,22 @@ I.AnimationController.addTextKeyHandler("soundgen", function(groupname, key)
    end
 end)
 
+-- Every attack key starts with the attack's name ("chop start", "shoot min hit"), and only attack animations have them,
+-- custom ones too (ReAnimation's HandToHandAlt, Katars). Keys of other groups can match the checks below too, like the
+-- shield's "block hit" (N'Garde plays it on every shield parry): read as an attack released, it left an attack that
+-- never ends, and the tree waiting for it stopped attacking for good.
+local ATTACK_KEY_NAMES = { chop = true, slash = true, thrust = true, shoot = true }
+
+-- Every key that moves the attack state records its group, so an attack state always has a group the main loop can see
+-- disappear, even when Mercy missed the start (Lua reloaded mid-swing). Only those keys: ReAnimation's tail flourish
+-- plays after the swing on a group of its own ("weapontwohandextra") with keys that pass the check above ("chop tail
+-- stop"), and can still be playing into the next swing. ReAnimation's attack variants play next to the engine's group
+-- with the same keys, so the group recorded is either of the two, and both last until the swing is over.
+local function setAttackState(attackState, groupname)
+   state.attackState = attackState
+   state.attackGroup = groupname
+end
+
 -- In the text key handler: Theres no way to know for which bonegroup the text key was triggered?
 I.AnimationController.addTextKeyHandler(nil, function(groupname, key)
    --print("Animation text key! " .. groupname .. " : " .. key)
@@ -1650,33 +1699,33 @@ I.AnimationController.addTextKeyHandler(nil, function(groupname, key)
       magicUtil.log("Anim key:", groupname, "|", key, "| stance", selfActor:getStance(), "| driver",
          lastControlOwner or "-")
    end
+   if not ATTACK_KEY_NAMES[string.match(key, "^%a+")] then return end
    -- "shoot start" is a bow, crossbow or thrown weapon: without it a draw only showed up once it reached "min attack"
    if string.find(key, "chop start") or string.find(key, "thrust start") or string.find(key, "slash start")
       or string.find(key, "shoot start") then
-      state.attackState = enums.ATTACK_STATE.WINDUP_START
-      state.attackGroup = groupname
+      setAttackState(enums.ATTACK_STATE.WINDUP_START, groupname)
    end
 
    -- Animation compilation has min and max attack on a same keyframe due to which they might arrive out of order. So avoid setting MIN state
    -- if higher state is already set
    if string.find(key, "min attack") and state.attackState < enums.ATTACK_STATE.WINDUP_MIN then
-      state.attackState = enums.ATTACK_STATE.WINDUP_MIN
+      setAttackState(enums.ATTACK_STATE.WINDUP_MIN, groupname)
    end
 
    if string.find(key, "max attack") then
       -- Attack is being held here, but this event will also trigger at the beginning of release
-      state.attackState = enums.ATTACK_STATE.WINDUP_MAX
+      setAttackState(enums.ATTACK_STATE.WINDUP_MAX, groupname)
    end
 
    if string.find(key, "min hit") then
       --Changing state to release on min hit is good enough
-      state.attackState = enums.ATTACK_STATE.RELEASE_START
+      setAttackState(enums.ATTACK_STATE.RELEASE_START, groupname)
    elseif string.find(key, "hit") then
-      state.attackState = enums.ATTACK_STATE.RELEASE_HIT
+      setAttackState(enums.ATTACK_STATE.RELEASE_HIT, groupname)
    end
 
    if string.find(key, "follow start") then
-      state.attackState = enums.ATTACK_STATE.FOLLOW_START
+      setAttackState(enums.ATTACK_STATE.FOLLOW_START, groupname)
    end
 
    if string.find(key, "follow stop") then

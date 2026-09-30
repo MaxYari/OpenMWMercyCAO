@@ -1,0 +1,9 @@
+#### Vivec Arena
+# Arena fights are fought to the end: fighters in the pit never surrender.
+# Covers the vanilla arena duels and Roaring Arena (https://www.nexusmods.com/morrowind/mods/50954),
+# which stages all its matches in this cell with an interior arena (vanilla, Atmospheric or glass-domed).
+# Cell ids are the cell's name in lowercase.
+
+surrender_disable:
+  cellIds:
+    - "vivec, arena pit"

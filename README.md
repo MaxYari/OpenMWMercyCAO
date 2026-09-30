@@ -137,18 +137,17 @@ Record ids are case-insensitive.
 
 ### Simple interface - overriding Mercy
 
-A simple enable/disable switch is available. Want to take control of the actor and get Mercy: CAO out of the way? Use that! Don't forget to re-enable Mercy on the when you are done.
+A simple enable/disable switch is available. Want to take control of the actor and get Mercy: CAO out of the way? Use that! Disabling Mercy hands the actor to the engine's AI, enabling it takes the AI away again until Mercy decides who drives. So call it when your mind changes, not every frame, and don't forget to re-enable Mercy when you are done.
 
 ```Lua
 local interfaces = require('openmw.interfaces')
 
+local controlling = false
+
 local function onUpdate(dt)
-   if interfaces.MercyCAO then
-      if i_want_to_control_the_actor_now then
-         interfaces.MercyCAO.setEnabled(false)
-      else 
-         interfaces.MercyCAO.setEnabled(true)
-      end
+   if interfaces.MercyCAO and i_want_to_control_the_actor_now ~= controlling then
+      controlling = i_want_to_control_the_actor_now
+      interfaces.MercyCAO.setEnabled(not controlling)
    end
 end
 
@@ -157,6 +156,21 @@ return {
         onUpdate = onUpdate,
     }
 }
+```
+
+### Simple interface - switching off only attacks or only movement
+
+Need just part of the actor? Switch off only that part of Mercy (requires `interfaces.MercyCAO.version >= 1.6`):
+- `combatEnabled(source, enabled)` - Mercy's attacks, spells and combat barks. While it's off Mercy doesn't attack or cast, doesn't change the NPC's stance and doesn't hand it to the engine's AI, but still moves it around and faces its enemy.
+- `locomotionEnabled(source, enabled)` - Mercy's movement, and acting out warnings, retreats, hiding and surrenders. While it's off the NPC stands still facing its enemy, but still attacks.
+
+`source` is a name of your choice, so mods don't switch each other's parts back on: a part stays off while any source keeps it off. Called without arguments, they tell whether that part is on. When Mercy leaves the NPC to the engine's AI on its own (e.g. there's no path to the enemy), the engine still attacks.
+
+```Lua
+-- The NPC raised its guard: it keeps its footwork but doesn't attack
+interfaces.MercyCAO.combatEnabled("my_parry_mod", false)
+-- Guard lowered
+interfaces.MercyCAO.combatEnabled("my_parry_mod", true)
 ```
 
 Note that some potentially usefull inforamtion is available on the `interfaces.MercyCAO.state` object. It can be useful if you want to integrate your mod a little bit better with Mercy. For example you might want to override NPC only when they are in an active combat state and not fleeing or standing ground/warning player not to come close, in that case - you migh check interfaces.MercyCAO.state.combatState == "FIGHT". Other useful properties of the state object are listed below under the Advanced interface section.
