@@ -48,6 +48,8 @@ end
 -- Hands the actor to the engine. Without a duration: for as long as the node runs. With one: a window of that many
 -- seconds, which only closes once the engine isn't busy (see engineBusy), so control is never taken back mid-swing.
 -- With 'endOnStance' (e.g. "Spell") the window also ends as soon as the engine puts the actor in that stance.
+-- With 'blockAttacks' the engine can't start an attack or a cast while the node runs, only pick what to do next (see
+-- blockEngineAttack in ImprovedAI's main loop).
 -- The frame a window closes is still vanilla: whatever runs next takes over deliberately, and if nothing does, a loop
 -- around this node starts the next window in the same frame.
 local function VanillaBehavior(config)
@@ -55,6 +57,7 @@ local function VanillaBehavior(config)
 
     config.start = function(task, state)
         state.vanillaBehavior = true
+        state.blockEngineAttack = p.blockAttacks ~= nil and p.blockAttacks() == true
         task.endsAt = nil
         task.startedAt = core.getSimulationTime()
         if p.duration then
@@ -68,6 +71,7 @@ local function VanillaBehavior(config)
 
     config.run = function(task, state)
         state.vanillaBehavior = true
+        state.blockEngineAttack = p.blockAttacks ~= nil and p.blockAttacks() == true
         if task.endsAt then
             if p.endOnStance and state.detStance == p.endOnStance() then
                 magicUtil.log(config.name, "engine window closes: the engine switched to", state.detStance, "stance")

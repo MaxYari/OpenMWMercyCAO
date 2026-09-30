@@ -193,6 +193,7 @@ local state = {
    clear = function(self)
       -- Fields below will be reset every frame
       self.vanillaBehavior = false
+      self.blockEngineAttack = false -- Set by a VanillaBehavior node that lets the engine pick but not attack
       self.stance = types.Actor.STANCE.Weapon
       self.run = true
       self.jump = false
@@ -224,8 +225,9 @@ local state = {
       return self.hitReactAt ~= nil and core.getSimulationTime() - self.hitReactAt <= HIT_REACT_WINDOW
    end,
 
-   -- Hand the actor to the engine for a moment so it can pick a spell: only if it has magic it could cast right now,
-   -- isn't attacking or staggered, and is out of melee reach (the engine would swing or turn to face first otherwise).
+   -- Hand the actor to the engine for a moment so it can pick a spell: only if it has magic it could cast right now and
+   -- isn't attacking or staggered. In melee reach too: the window doesn't let the engine start an attack (see
+   -- blockEngineAttack), so the engine picking its weapon there doesn't swing.
    -- Checked by the Magic Window branch, which the tree only reaches between attacks.
    canHandOverForMagic = function(self)
       -- With OSSC installed there's nothing to hand over for: OSSC picks and casts the actor's own spells itself,
@@ -241,7 +243,7 @@ local state = {
       -- routines of their own: handing the actor to the engine in the middle of one derails it.
       if self.combatState ~= enums.COMBAT_STATE.FIGHT then return false end
       -- A burst's follow-through can still be playing when the tree gets here
-      if self.attackState ~= enums.ATTACK_STATE.NO_STATE or self.staggerGroup or self.range <= self.reach then
+      if self.attackState ~= enums.ATTACK_STATE.NO_STATE or self.staggerGroup then
          return false
       end
       return magicUtil.canAttemptCastNow(omwself, self.castables)
@@ -713,6 +715,8 @@ local askedForMercyOnce = false
 -- Custom spells rolled on the first fight: key -> learned spell record id, or false. nil until rolled. Saved.
 local learnedCustomSpells = nil
 local pitchSteered = false -- Pitch was changed while aiming and may still need levelling
+-- Simulation time of the last frame the engine was kept from attacking (see blockEngineAttack), for debug logging
+local engineAttackBlockedAt = -1
 -- Debug logging of who drives the actor in combat and its stance, logged only when they change
 local lastControlOwner = nil
 local lastLoggedStance = nil
@@ -1453,6 +1457,12 @@ local function onUpdate(dt)
    end
 
    state.detStance = detStance
+   -- While warning, a spellcaster keeps the spell the engine readied (Mercy only hears of a fight once the engine drew
+   -- something) instead of drawing a weapon, so it casts rather than charging in when the fight starts. Set before the
+   -- trees run, so the frame the warning turns into a fight keeps it too. Anything else warns with its weapon.
+   if state.combatState == enums.COMBAT_STATE.STAND_GROUND and detStance == gutils.Actor.DET_STANCE.Spell then
+      state.stance = types.Actor.STANCE.Spell
+   end
 
    -- Get weapon stats
    local weaponObj = selfActor:getEquipment(types.Actor.EQUIPMENT_SLOT.CarriedRight)
@@ -1555,6 +1565,17 @@ local function onUpdate(dt)
    -- Apply state properties modified by behavior trees to actor controls ----
    if state.vanillaBehavior then
       enableAI(true)
+      -- A window where the engine may pick what to do but not attack (e.g. the Magic Window): the engine applies the
+      -- controls a script wrote right after its own AI step, so 'use' written here undoes any swing or cast it starts
+      -- that frame. Writing one control applies them all, the rest as the engine left them the frame before. What's
+      -- read back is the engine's own attack from that step, so a blocked frame after a blocked frame shows if it tried.
+      if state.blockEngineAttack then
+         if magicUtil.DEBUG_LOGGING and omwself.controls.use ~= 0 and now - engineAttackBlockedAt < dt * 1.5 then
+            magicUtil.log("Engine tried to attack or cast in a pick window - blocked | stance", detStance)
+         end
+         omwself.controls.use = state.attack
+         engineAttackBlockedAt = now
+      end
       noteControlOwner("vanilla (tree)", detStance)
       return
    else
