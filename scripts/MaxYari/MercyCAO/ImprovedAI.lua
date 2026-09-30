@@ -85,6 +85,9 @@ local RETREAT_HIDE_BASE_CHANCE = 0.5
 local SCARED_BASE_CHANCE = 0.2
 -- A hiding NPC isn't spotted by enemies further away than this: the engine's sneak check range, but at least 1000
 local HIDE_NOTICE_RANGE = math.max(1000, core.getGMST("fSneakUseDist"))
+-- A reaction to being attacked from mid range (see onMeleeAttacked) that the trees couldn't start within this many
+-- seconds of the attack is dropped
+local HIT_REACT_WINDOW = 0.5
 
 -- Navigation service
 local NavigationService = require(mp .. "scripts/navservice")
@@ -135,8 +138,15 @@ local state = {
    midChaseInc = 50,
    midAttackInc = 50,
    midStopInc = 50,
+   missReactInc = 50, -- 0-100 chance of reacting to a melee miss from mid range, read by onMeleeAttacked
    jumpInc = 0,
    zoomiesInc = 0,
+
+   -- Reacting to being attacked in melee from mid range, set by onMeleeAttacked. Each flag is cleared by the tree
+   -- branch that acts on it.
+   hitReactMove = false,    -- Locomotion: fall back or close in
+   hitReactAttack = false,  -- Combat: maybe wind up an attack
+   hitReactAt = nil,        -- Simulation time of the attack, see hitReactFresh
 
    -- Warning (STAND_GROUND) fields, updated by the main loop
    warnsLeft = nil,         -- Patience: how many more times this NPC will warn instead of fighting. Rolled once and saved.
@@ -207,6 +217,11 @@ local state = {
    end,
    isMelee = function(self)
       return self.detStance == gutils.Actor.DET_STANCE.Melee
+   end,
+   -- A reaction to being attacked (see onMeleeAttacked) can still start: the attack was at most HIT_REACT_WINDOW
+   -- seconds ago. A reaction the trees can't get to in time, e.g. while charging, isn't acted on later.
+   hitReactFresh = function(self)
+      return self.hitReactAt ~= nil and core.getSimulationTime() - self.hitReactAt <= HIT_REACT_WINDOW
    end,
 
    -- Hand the actor to the engine for a moment so it can pick a spell: only if it has magic it could cast right now,
@@ -458,9 +473,14 @@ local function isBlacklisted(blist)
    return (blist.recordIdsMap[omwself.recordId] or blist.cellIdsMap[omwself.cell.id])
 end
 
+-- Which way each inclination moves has a seeded stream of its own, so the rolls taken from luaRandom (spread, weirdness,
+-- going ham) keep their order and NPCs keep the personalities they already had. Seeded in STARTEVERYTHING.
+local inclinationRandom = setmetatable({ a = 1103515245, c = 12345, m = 0x10000, x = 0 }, getmetatable(luaRandom))
+
 local function randomiseInclinations()
+   -- New inclinations go at the end, so the ones before them keep the directions they rolled
    local standartInclinations = { "rootedAttackInc", "nearStopInc", "nearStrafeInc", "nearBackInc", "midStrafeInc",
-      "midChaseInc", "midAttackInc", "midStopInc" }
+      "midChaseInc", "midAttackInc", "midStopInc", "missReactInc" }
    local weirdInclinations = { "jumpInc", "zoomiesInc" }
 
    state.slowSpeedFactor = luaRandom:random(0, 1)
@@ -476,7 +496,9 @@ local function randomiseInclinations()
          increment = 15
          table.insert(possibleChange, 0)
       end
-      local change = possibleChange[math.random(1, #possibleChange)]
+      -- Picked from a fraction, not random(1, n): the generator's lowest bit alternates, so random(1, 2) would flip
+      -- between -1 and 1 from one inclination to the next
+      local change = possibleChange[math.floor(inclinationRandom:random() * #possibleChange) + 1]
       state[param] = util.clamp(state[param] + increment * change, 0, 100)
    end
 
@@ -501,8 +523,8 @@ local function randomiseInclinations()
 
    -- Combat Intensity, applied last so it shifts whatever personality was rolled above rather than replacing it.
    -- The weights (nearStop/nearBack/midStop/midChase) are picked between by RunRandom, which normalises by their
-   -- total, so they need no upper bound. rootedAttackInc and midAttackInc are 0-100 probabilities for RandomThrough,
-   -- so those stay clamped. The strafe weights are left alone: strafing isn't hanging back, and it's what Mercy's
+   -- total, so they need no upper bound. rootedAttackInc, midAttackInc and missReactInc are 0-100 probabilities, so
+   -- those stay clamped. The strafe weights are left alone: strafing isn't hanging back, and it's what Mercy's
    -- movement looks like.
    if CombatIntensity ~= 1 then
       state.nearStopInc = state.nearStopInc / CombatIntensity
@@ -511,6 +533,7 @@ local function randomiseInclinations()
       state.midChaseInc = state.midChaseInc * CombatIntensity
       state.rootedAttackInc = util.clamp(state.rootedAttackInc * CombatIntensity, 0, 100)
       state.midAttackInc = util.clamp(state.midAttackInc * CombatIntensity, 0, 100)
+      state.missReactInc = util.clamp(state.missReactInc * CombatIntensity, 0, 100)
    end
 
    -- Print the modified state for verification
@@ -1110,9 +1133,14 @@ local function STARTEVERYTHING(BTJsonData)
 
    -- Rndomising key npc factors
    -- Guards are seeded by their record, so every guard of a kind behaves the same (all Hlaalu guards jump); everyone
-   -- else by npcSeedKey, so each NPC is its own. The magic stream is always per NPC.
+   -- else by npcSeedKey, so each NPC is its own. The inclinations' directions follow the same rule, the magic stream
+   -- is always per NPC.
    local seedKey = npcSeedKey()
-   luaRandom:randomseed(gutils.stringToHash(isGuard and omwself.recordId or seedKey))
+   local personalityKey = isGuard and omwself.recordId or seedKey
+   luaRandom:randomseed(gutils.stringToHash(personalityKey))
+   -- Only the seed's low 16 bits matter to the generator, and a larger seed loses some of them to float rounding on the
+   -- first roll, so many NPCs would end up sharing a stream
+   inclinationRandom:randomseed(gutils.stringToHash(personalityKey .. "|inclinations") % 0x10000)
    magicRandom:randomseed(gutils.stringToHash(seedKey .. "|magic"))
    randomiseInclinations()
    -- What the actor's own spells cost, read now while no fight is on (see scanOwnMagic)
@@ -1738,6 +1766,41 @@ end)
 
 -- Events from other actors -------------------------------------------------------
 -----------------------------------------------------------------------------------
+
+-- Attacked in melee by its enemy from mid range, i.e. from outside its own reach (e.g. poked with a spear): a hit always
+-- gets a reaction, a miss (a failed hit roll, or a hit taken on a shield) gets one missReactInc % of the time. The
+-- reaction is carried out by the trees: falling back or closing in (Locomotion), and maybe winding up an attack
+-- (Combat), unless it's in one already. A swing that doesn't reach the NPC isn't reported by the engine at all.
+-- Runs only when the NPC is attacked.
+local function onMeleeAttacked(attack)
+   if not bTrees or activeAiPackage.type ~= "Combat" or state.combatState ~= enums.COMBAT_STATE.FIGHT then return end
+   if attack.sourceType ~= I.Combat.ATTACK_SOURCE_TYPES.Melee or not attack.attacker
+      or attack.attacker ~= state.enemyActor or not state:isMelee() then
+      return
+   end
+   local distance = gutils.getDistanceToBounds(omwself, attack.attacker)
+   if distance < state.reach then return end
+
+   -- A hit taken on a shield comes as a successful attack doing no damage
+   local damage = attack.damage or {}
+   local landed = attack.successful and (damage.health or damage.fatigue or 0) > 0
+   if not landed then
+      local roll = math.random() * 100
+      if roll >= state.missReactInc then
+         magicUtil.log("Missed from mid range, distance", math.floor(distance), string.format(
+            "- react chance %.0f%%, rolled %.0f%% - not reacting", state.missReactInc, roll))
+         return
+      end
+   end
+   state.hitReactAt = core.getSimulationTime()
+   state.hitReactMove = true
+   state.hitReactAttack = not state.inAttackSequence and state.attackState == enums.ATTACK_STATE.NO_STATE
+   magicUtil.log(landed and "Hit" or "Missed", "from mid range, distance", math.floor(distance), "- reacting,",
+      state.hitReactAttack and "may wind up" or "already attacking")
+end
+-- Handlers added later run first: this one runs before the engine's own, which applies armor and difficulty to the
+-- damage. It never returns false, so it never stops the ones after it.
+if I.Combat and I.Combat.addOnHitHandler then I.Combat.addOnHitHandler(onMeleeAttacked) end
 
 -- Also if you miss with ranged - theyll ignore that as well
 local function onFriendDamaged(e)
