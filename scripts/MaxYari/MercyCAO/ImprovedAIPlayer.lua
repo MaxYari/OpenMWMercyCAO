@@ -80,7 +80,7 @@ local function onConsoleCommand(mode, command, selectedObject)
     if not words[1] or words[1]:lower() ~= CONSOLE_COMMAND then return end
 
     local spellKeys = {}
-    for _, spell in ipairs(require(mp .. "scripts/spells/init")) do spellKeys[spell.key:lower()] = spell.key end
+    for _, spell in ipairs(require(mp .. "scripts/spells/init").spells) do spellKeys[spell.key:lower()] = spell.key end
     local keys = {}
     for i = 2, #words do
         local key = spellKeys[words[i]:lower():gsub(",", "")]
@@ -122,7 +122,7 @@ local eventHandlers = {
 -- Custom spells' own event handlers for the player as a possible target, and their per-frame player work, from their
 -- files in scripts/spells
 local spellPlayerFrames = {}
-for _, spell in ipairs(require(mp .. "scripts/spells/init")) do
+for _, spell in ipairs(require(mp .. "scripts/spells/init").spells) do
     for name, handler in pairs(spell.targetEventHandlers or {}) do
         eventHandlers[name] = handler
     end

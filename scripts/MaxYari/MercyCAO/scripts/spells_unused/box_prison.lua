@@ -1,10 +1,10 @@
--- Box Prison (not in use: not listed in spells/init.lua, Skeleton Jail took its place): a bolt that, when it lands, closes
--- its target in a ring of crates for a while. The crates are low enough to
--- jump over. Sometimes the caster then runs away, leaving the target stuck.
+-- Box Prison (not in use: kept here, outside the spells folder Mercy loads; Skeleton Jail took its place): a bolt that,
+-- when it lands, closes its target in a ring of crates for a while. The crates are low enough to jump over. Sometimes
+-- the caster then runs away, leaving the target stuck.
 local core = require('openmw.core')
 local RANGE = core.magic.RANGE
 local CHARACTER = require("scripts/MaxYari/MercyCAO/scripts/enums").CHARACTER_TYPE
-local TimedObjects = require("scripts/MaxYari/MercyCAO/scripts/spells/timed_objects")
+local TimedObjects = require("scripts/MaxYari/MercyCAO/scripts/spells/lib/timed_objects")
 
 -- Closed crates look like containers, but containers can be looted: the crates are statics made with a container's model
 local CRATE_MODEL_FROM = "crate_01" -- A container using o\Contain_crate_01.nif: a 64 unit cube, origin at its centre

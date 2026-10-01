@@ -6,7 +6,7 @@
 local core = require('openmw.core')
 local RANGE = core.magic.RANGE
 local CHARACTER = require("scripts/MaxYari/MercyCAO/scripts/enums").CHARACTER_TYPE
-local TimedObjects = require("scripts/MaxYari/MercyCAO/scripts/spells/timed_objects")
+local TimedObjects = require("scripts/MaxYari/MercyCAO/scripts/spells/lib/timed_objects")
 
 local PILLOW_TEMPLATE = "misc_uni_pillow_01"
 local PILLOW_NAME = "Conjured Pillow"

@@ -190,7 +190,30 @@ end
 
 function module.canAfford(actor, spellId)
     local spell = core.magic.spells.records[spellId]
-    return spell ~= nil and types.Actor.stats.dynamic.magicka(actor).current >= spell.cost
+    return spell ~= nil and types.Actor.stats.dynamic.magicka(actor).current >= module.spellCost(spell)
+end
+
+-- What casting a spell costs, the way the engine works it out (calcSpellCost, spellutil.cpp): an autocalculated
+-- spell's cost comes from its effects, whatever its 'cost' field says. Mercy's own records are never autocalculated,
+-- another mod's record (a 'recordId' spell) can be.
+local fEffectCostMult = nil
+function module.spellCost(spell)
+    if not spell.autocalcFlag then return spell.cost end
+    fEffectCostMult = fEffectCostMult or core.getGMST("fEffectCostMult")
+    local cost = 0
+    for _, params in ipairs(spell.effects) do
+        local effect = params.effect
+        local magnitudeMin = effect.hasMagnitude and math.max(1, params.magnitudeMin) or 1
+        local magnitudeMax = effect.hasMagnitude and math.max(1, params.magnitudeMax) or 1
+        local duration = effect.hasDuration and params.duration or 1
+        if not effect.isAppliedOnce then duration = math.max(1, duration) end
+        local effectCost = 0.5 * (magnitudeMin + magnitudeMax) * 0.1 * effect.baseCost * duration
+            + 0.05 * math.max(0, params.area) * effect.baseCost
+        effectCost = math.max(0, effectCost * fEffectCostMult)
+        if params.range == core.magic.RANGE.Target then effectCost = effectCost * 1.5 end
+        cost = cost + effectCost
+    end
+    return math.floor(cost + 0.5)
 end
 
 -- The target has this spell active on it, cast by 'caster'. Ids are compared case insensitively: the engine hands
@@ -246,13 +269,14 @@ end
 -- With OSSC's caster script on this actor the cast goes through it (it pays the magicka) and a refusal comes back as
 -- ok=false. Without it (not attached yet at the start of a fight) OSSC's global route casts for any actor, with
 -- Spell Framework Plus charging the magicka, but it can't answer: the cast counts as sent, and one that never
--- happened shows up as a miss. Returns ok, reason.
-function module.osscCast(spellId, target)
+-- happened shows up as a miss. 'userData' (optional) is handed on to Spell Framework Plus with the cast, on both routes.
+-- Returns ok, reason.
+function module.osscCast(spellId, target, userData)
     local caster = module.osscCaster()
-    if caster then return caster.castSpellAtTarget({ spellId = spellId, target = target }) end
+    if caster then return caster.castSpellAtTarget({ spellId = spellId, target = target, userData = userData }) end
     local halfHeight = types.Actor.getPathfindingAgentBounds(omwself).halfExtents.z
     core.sendGlobalEvent("OSSC_CastSpellAtTarget", {
-        caster = omwself.object, spellId = spellId, target = target,
+        caster = omwself.object, spellId = spellId, target = target, userData = userData,
         -- The global route starts at the caster's feet by default: chest height and a step ahead instead, as OSSC's
         -- own casts do
         startPos = omwself.position + util.vector3(0, 0, halfHeight * 1.5), spawnOffset = 80,
@@ -301,11 +325,11 @@ function module.osscSetPaused(paused)
 end
 
 -- Custom spells ---------------------------------------------------------------------------------------------------
--- Mercy's own spells, each in its own file in scripts/spells. The global script creates a record for each once per game
--- (records are saved with the game)
--- and again whenever its 'version' changes; bump 'version' after changing a record. Spellcasters get some of them on
--- their first fight, and some other NPCs too, becoming spellcasters (see rollCustomSpells); they swap to newer records
--- later.
+-- Mercy's own spells, and other mods' dropped in with them, each in its own file in scripts/spells. For a spell made from
+-- a 'record' the global script creates a record once per game (records are saved with the game) and again whenever its
+-- 'version' changes; bump 'version' after changing a record. A spell naming a 'recordId' casts that existing record
+-- instead. Spellcasters get some of them on their first fight, and some other NPCs too, becoming spellcasters (see
+-- rollCustomSpells); they swap to newer records later.
 --
 -- A custom spell goes on its cooldown ('cooldown', or CUSTOM_SPELL_DEFAULT_COOLDOWN) when cast. A miss (a target spell
 -- not landing within the main loop's hit window) lifts the cooldown, unless it's CUSTOM_SPELL_MISSES_BEFORE_COOLDOWN
@@ -314,7 +338,8 @@ end
 --
 -- The engine's AI rates most of these effects 0 and doesn't cast them on its own (Skeleton Jail's Detect Animal
 -- stand-in included). Exceptions, which it can cast by itself in an engine window when OSSC isn't installed: Blind (Veil
--- of Darkness), Drain Attribute (Levitate Bolt) and Dispel (Unweaving).
+-- of Darkness), Drain Attribute (Levitate Bolt) and Dispel (Unweaving). Other mods' custom effects are rated like any
+-- other effect, so a spell built on one can be cast by the engine too.
 module.CUSTOM_SPELL_DEFAULT_COOLDOWN = 20
 module.CUSTOM_SPELL_MISSES_BEFORE_COOLDOWN = 2
 
@@ -325,9 +350,9 @@ module.CUSTOM_SPELL_MISSES_BEFORE_COOLDOWN = 2
 -- exotic roll counts as failed when the NPC can't get any exotic spell.
 -- Then one from the counterspell bundle (COUNTER_BUNDLE_CHANCE), rolled on its own. Within a bundle a spell is picked by
 -- 'weight': weights summing above 1 are scaled down to 1, below 1 the rest is the chance of picking nothing. A spell isn't
--- picked if the NPC is below its 'minLevel', if the NPC's character type isn't among its 'character_type', if a spell in
--- its 'incompatibleWith' list is already picked, or if its 'available' function says it can't be used in this game (e.g.
--- a mod it needs isn't installed).
+-- picked if the NPC is below its 'minLevel', if the NPC's character type isn't among its 'character_type' or if a spell
+-- in its 'incompatibleWith' list is already picked. A spell that can't be used in this game (e.g. a mod it needs isn't
+-- installed) isn't among them at all, see scripts/spells/init.lua.
 module.EXOTIC_BUNDLE_CHANCE = 0.33
 module.MAGIC_AND_EXOTIC_COMBO_CHANCE = 0.25
 -- The counterspell bundle is rolled separately from the rest, see rollCustomSpells
@@ -335,12 +360,15 @@ module.COUNTER_BUNDLE_CHANCE = 0.33
 -- Spellcasters of this level and above roll the normal / exotic spells twice (the counterspell bundle still once)
 module.EXTRA_SPELL_ROLL_LEVEL = 16 -- (when npc.extraSpellRolls, from the settings)
 
--- Spell definitions live in scripts/spells, one file each (see scripts/spells/init.lua for their fields)
+-- Spell definitions live in scripts/spells, one file each (see scripts/spells/init.lua for their fields). Only the ones
+-- that can be used in this game: the files left out, and why, are in SKIPPED_SPELLS.
 local mp = "scripts/MaxYari/MercyCAO/"
+local spellFiles = require(mp .. "scripts/spells/init")
 module.CUSTOM_SPELLS = {}
-for _, spell in ipairs(require(mp .. "scripts/spells/init")) do
+for _, spell in ipairs(spellFiles.spells) do
     module.CUSTOM_SPELLS[spell.key] = spell
 end
+module.SKIPPED_SPELLS = spellFiles.skipped
 
 local function sortedKeys(t)
     local keys = {}
@@ -369,10 +397,16 @@ function module.isForCharacter(key, characterType)
     return false
 end
 
--- Whether a custom spell can be used in this game
+-- Whether a custom spell can be used in this game. Not for a key from a save whose spell file is gone, or was left out
+-- (e.g. the mod it needs isn't installed anymore).
 function module.isAvailable(key)
+    return module.CUSTOM_SPELLS[key] ~= nil
+end
+
+-- Whether a custom spell casts an existing record ('recordId', e.g. another mod's spell) rather than one Mercy made
+function module.isBorrowedSpell(key)
     local spell = module.CUSTOM_SPELLS[key]
-    return spell ~= nil and (not spell.available or spell.available())
+    return spell ~= nil and spell.recordId ~= nil
 end
 
 -- The spells of a bundle this NPC can get, given what it already picked

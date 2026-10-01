@@ -5,7 +5,7 @@
 local core = require('openmw.core')
 local RANGE = core.magic.RANGE
 local CHARACTER = require("scripts/MaxYari/MercyCAO/scripts/enums").CHARACTER_TYPE
-local TimedObjects = require("scripts/MaxYari/MercyCAO/scripts/spells/timed_objects")
+local TimedObjects = require("scripts/MaxYari/MercyCAO/scripts/spells/lib/timed_objects")
 
 local CREATURE = "skeleton_weak"
 local COUNT = 4

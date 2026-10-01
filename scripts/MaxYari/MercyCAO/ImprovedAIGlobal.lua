@@ -91,20 +91,22 @@ blacklist = loadBlacklists()
 
 -- Mercy's custom spells ----------------------------------------------------
 -- Records are created once per game and saved with it, and again when a definition's version changes.
--- Their generated ids are kept in this script's save data.
+-- Their generated ids are kept in this script's save data. A 'recordId' spell just maps to that existing record.
 local customSpells = {}        -- key -> spell record id
 local customSpellVersions = {} -- key -> version of the definition the record was created from
 
 -- Mercy's spells are Mercy's to cast: OSSC (Oblivion-Style Spell Casting) is told never to pick them for its own
 -- quick-casts. Its filter is global, saved with the game and broadcast to every caster it manages, and an explicit
--- castSpellAtTarget still works - which is exactly how Mercy casts them when OSSC is installed.
+-- castSpellAtTarget still works - which is exactly how Mercy casts them when OSSC is installed. Not another mod's record
+-- cast through 'recordId': NPCs that know it on their own keep casting it through OSSC.
 local osscIgnored = {}
 local function ignoreInOSSC()
     local osscCasters = I.OSSC_Casters
     if not osscCasters or type(osscCasters.ignoreSpell) ~= "function" then return end
-    for key, id in pairs(customSpells) do
-        if id and osscIgnored[key] ~= id then
-            osscCasters.ignoreSpell(id)
+    for key, definition in pairs(magicUtil.CUSTOM_SPELLS) do
+        local id = not definition.recordId and customSpells[key] or nil
+        if osscIgnored[key] ~= id then
+            if id then osscCasters.ignoreSpell(id) end
             -- The record is recreated when a definition's version changes, so the old id can go back to OSSC
             if osscIgnored[key] and osscCasters.unignoreSpell then osscCasters.unignoreSpell(osscIgnored[key]) end
             osscIgnored[key] = id
@@ -113,10 +115,17 @@ local function ignoreInOSSC()
     end
 end
 
+-- Only for the spells usable in this game (magicUtil.CUSTOM_SPELLS): one whose mod isn't installed never gets a record,
+-- which couldn't be made anyway with an effect that doesn't exist. Ids of spells left out stay in the save, in case
+-- their mod comes back.
+local BORROWED = "borrowed" -- In customSpellVersions: a 'recordId' spell, so switching it back to a 'record' creates one
 local function ensureCustomSpells()
     for key, definition in pairs(magicUtil.CUSTOM_SPELLS) do
         local id = customSpells[key]
-        if not id or not core.magic.spells.records[id] or customSpellVersions[key] ~= definition.version then
+        if definition.recordId then
+            customSpells[key] = core.magic.spells.records[definition.recordId].id
+            customSpellVersions[key] = BORROWED
+        elseif not id or not core.magic.spells.records[id] or customSpellVersions[key] ~= definition.version then
             local record = world.createRecord(core.magic.spells.createRecordDraft(definition.record))
             customSpells[key] = record.id
             customSpellVersions[key] = definition.version
@@ -125,6 +134,71 @@ local function ensureCustomSpells()
     end
     ignoreInOSSC()
 end
+
+-- What actors get: the usable spells only
+local function usableCustomSpells()
+    local usable = {}
+    for key in pairs(magicUtil.CUSTOM_SPELLS) do usable[key] = customSpells[key] end
+    return usable
+end
+
+for _, skipped in ipairs(magicUtil.SKIPPED_SPELLS) do
+    gutils.print("Mercy: custom spell file " .. skipped.file .. " isn't used: " .. skipped.reason, 1)
+end
+
+-- Every custom spell needs a branch in the tree's Spells subtree to be cast. Mercy's own are placed in the editor; the
+-- others (e.g. other mods' spells) get one here, made from the spell's 'cast' (see scripts/spells/init.lua), before the
+-- project is sent to any actor. It's the same as a placed one: a PeriodicCondition (its timer kept by its title) over a
+-- CastSpell, added to the subtree's root with the rest.
+local DEFAULT_CAST_CONDITION = "$range < 2000 and $:enemyInLineOfSight()"
+local DEFAULT_CAST_PERIOD = { 4, 7 }
+local function addSpellBranches(project)
+    local spellsTree = nil
+    for _, tree in pairs((project.data or project).trees) do
+        if tree.title == "Spells" then spellsTree = tree end
+    end
+    local root = spellsTree and spellsTree.nodes[spellsTree.root]
+    if not (root and root.children) then
+        gutils.print("Mercy: the behaviour tree has no Spells subtree to add custom spell branches to", 0)
+        return
+    end
+    local placed = {}
+    for _, node in pairs(spellsTree.nodes) do
+        if node.name == "CastSpell" and node.properties and node.properties.customSpell then
+            placed[node.properties.customSpell] = true
+        end
+    end
+    local keys = {}
+    for key in pairs(magicUtil.CUSTOM_SPELLS) do
+        if not placed[key] then keys[#keys + 1] = key end
+    end
+    table.sort(keys)
+    for _, key in ipairs(keys) do
+        local cast = magicUtil.CUSTOM_SPELLS[key].cast or {}
+        local period = cast.period or DEFAULT_CAST_PERIOD
+        local conditionId, castId = "mercy-spell-" .. key, "mercy-spell-cast-" .. key
+        spellsTree.nodes[conditionId] = {
+            id = conditionId,
+            name = "PeriodicCondition",
+            title = "Custom Spell " .. key,
+            properties = {
+                period = string.format("$r(%s,%s)", period[1], period[2]),
+                condition = string.format('$:canCastCustom("%s") and (%s)', key,
+                    cast.condition or DEFAULT_CAST_CONDITION),
+            },
+            child = castId,
+        }
+        spellsTree.nodes[castId] = {
+            id = castId,
+            name = "CastSpell",
+            title = "Cast " .. key,
+            properties = { customSpell = key, aim = tostring(cast.aim ~= false) },
+        }
+        root.children[#root.children + 1] = conditionId
+        magicUtil.log("Added a tree branch for custom spell", key)
+    end
+end
+addSpellBranches(b3projectJson)
 
 -- Custom spells' own global side (event handlers, updates, save data), from their files in scripts/spells
 local spellUpdates = {}
@@ -150,7 +224,7 @@ local function onUpdate()
         actor:sendEvent("Mercy_StartupData",{
             b3projectJson = b3projectJson,
             blacklist = blacklist,
-            customSpells = customSpells,
+            customSpells = usableCustomSpells(),
         })
     end
 end

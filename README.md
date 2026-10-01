@@ -106,7 +106,7 @@ Mods by [mym](https://next.nexusmods.com/profile/mym) are compatible.
 
 ## ☮ For developers
 
-Mercy provides an extension interface for developing new NPC behaviours that get injected alongside Mercy's own (patches for other mods can be made the same way), an interface to take Mercy out of the way for specific NPCs, and a config system to blacklist specific NPCs or whole cells from Mercy or from surrendering, and to keep specific items from being dropped by surrendering NPCs. Mercy's behaviour trees live in `OpenMW AI.b3`, which you can open in the [Behavior3+ editor](https://github.com/MaxYari/behavior3editorplus).
+Mercy provides an extension interface for developing new NPC behaviours that get injected alongside Mercy's own (patches for other mods can be made the same way), an interface to take Mercy out of the way for specific NPCs, and a config system to blacklist specific NPCs or whole cells from Mercy or from surrendering, and to keep specific items from being dropped by surrendering NPCs. Spell mods can also drop a file into Mercy's spells folder to have Mercy's NPCs cast their spells. Mercy's behaviour trees live in `OpenMW AI.b3`, which you can open in the [Behavior3+ editor](https://github.com/MaxYari/behavior3editorplus).
 
 All of it is documented in the [git repository](https://github.com/MaxYari/OpenMWMercyCAO#adding-mercy-compatibility-to-your-mod). If you are already reading this on git - just read below.
 
@@ -133,6 +133,71 @@ item_dump_disable:
 ```
 
 Record ids are case-insensitive.
+
+
+### Moddable custom spells - letting NPCs cast your spell
+
+This is for making extra NPC spells out of your own custom magic effect (e.g. one made with `openmw.content`). Mercy gives such a spell only to the NPCs you filter for and casts it itself: it always succeeds, and comes with Mercy's cooldowns, magicka checks and aiming. Your mod adds one by dropping a single Lua file into `scripts/MaxYari/MercyCAO/scripts/spells/`. Every `.lua` file directly in that folder is loaded, so give yours a unique name, e.g. `mymod_myspell.lua`.
+
+You don't need this just to get your spell to NPCs: if your spell record is autocalculated (`isAutocalc`), the engine already gives it to some casters (NPCs with autocalculated stats, when they're first created), and their AI casts it like any other spell. Effects implemented only in the player script won't do anything on an NPC either way - handling the effect on NPCs is up to your mod.
+
+The file returns a table describing the spell, either:
+- `record` - spell record fields with your effect in them; Mercy creates the record itself. Your mod's own scripts handle the effect as usual.
+- `recordId` - an existing spell record, cast unchanged with its own cost, effects and chance to succeed.
+
+The rest is Mercy's: which NPCs can get the spell (`bundle`, `weight`, `minLevel`, `character_type`), `cooldown`, and `cast` - when the NPC casts it (`condition`, written like the conditions in `OpenMW AI.b3`; `period` between tries; `aim` at the enemy). Everything in `cast` has defaults. The full list of fields, including callbacks for spells implemented entirely in Lua (`onCast`, `onHit`, event handlers...), is in `scripts/spells/init.lua`.
+
+A spell that can't work in the current game is left out before any NPC can get it: a missing `recordId`, a missing effect, or your own `available()` returning false. So a compat file installed without the mod it's for does nothing. A file with a mistake that would break Mercy (an invalid record, a `cast.condition` that doesn't compile) is left out the same way, and the reason is printed to the log. The file is loaded by both global and local scripts, so require context-specific packages (`openmw.world`, `openmw.nearby`, ...) inside functions only.
+
+Using your effect, with Mercy making the spell:
+```Lua
+-- scripts/MaxYari/MercyCAO/scripts/spells/mymod_slash.lua
+local core = require('openmw.core')
+local CHARACTER = require("scripts/MaxYari/MercyCAO/scripts/enums").CHARACTER_TYPE
+
+return {
+    key = "mymodSlash",         -- Unique, also used by the "luamercy" console command
+    version = 1,                -- Bump after changing 'record', so saved games get the new one
+    bundle = "exotic",          -- "normal", "exotic" or "counter"
+    weight = 1,
+    minLevel = 10,
+    character_type = { CHARACTER.Spellcaster },
+    cooldown = 25,
+    record = {
+        name = "Slash",
+        type = core.magic.SPELL_TYPE.Spell,
+        cost = 20,
+        alwaysSucceedFlag = true,
+        isAutocalc = false,
+        effects = {
+            { id = "mymod_slash", range = core.magic.RANGE.Target, area = 0, magnitudeMin = 20, magnitudeMax = 40 },
+        },
+    },
+    cast = {
+        condition = "$range < 2000 and $:enemyInLineOfSight()",
+        period = { 4, 7 },
+        aim = true,
+    },
+}
+```
+
+Casting an existing spell record:
+```Lua
+-- scripts/MaxYari/MercyCAO/scripts/spells/mymod_rend.lua
+local CHARACTER = require("scripts/MaxYari/MercyCAO/scripts/enums").CHARACTER_TYPE
+
+return {
+    key = "mymodRend",
+    recordId = "mymod_rend",    -- Your mod's spell record
+    bundle = "exotic",
+    weight = 1,
+    minLevel = 10,
+    character_type = { CHARACTER.Spellcaster },
+    cooldown = 25,
+}
+```
+
+To test, select an NPC in the `~` console and type `luamercy mymodSlash`: that NPC learns the spell right away, even if it isn't a spellcaster. `scripts/spells_unused/magic_slash.lua` is a complete example made for the Magic Slash Spell mod.
 
 
 ### Simple interface - overriding Mercy

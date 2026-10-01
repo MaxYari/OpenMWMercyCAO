@@ -1251,7 +1251,7 @@ local CAST_RELEASE_KEYS = { ["self release"] = true, ["touch release"] = true, [
 local CAST_STOP_KEYS = { ["self stop"] = true, ["touch stop"] = true, ["target stop"] = true }
 
 -- Casts a spell the actor knows ('spell' is a spell record id, or 'customSpell' is the key of one of Mercy's custom
--- spells, e.g. "levitateBolt"), driving the actor itself: spell stance, selects the
+-- spells, e.g. "slowBolt"), driving the actor itself: spell stance, selects the
 -- spell, with 'aim' turns and pitches at the enemy leading a moving target, presses use and waits for the cast
 -- animation to finish. The main loop keeps the actor still and in Mercy's hands while state.castingCustom is set.
 -- Back to back custom spells: once MAX_BACK_TO_BACK different ones were cast in a row (each starting within
@@ -1333,7 +1333,8 @@ function CastSpell(config)
         -- the node just fails and the spell is tried again on a later pass. No falling back to the stance cast: OSSC
         -- strips the spells from the actor's list, so that ended with raised hands and nothing to cast.
         if magicUtil.osscInstalled() then
-            local ok, reason = magicUtil.osscCast(task.spellId, state.enemyActor)
+            local definition = task.customSpell and magicUtil.CUSTOM_SPELLS[task.customSpell]
+            local ok, reason = magicUtil.osscCast(task.spellId, state.enemyActor, definition and definition.osscUserData)
             if not ok then
                 magicUtil.log(config.name, "OSSC refused the cast:", tostring(reason))
                 return task:fail()

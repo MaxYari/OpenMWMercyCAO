@@ -1,4 +1,5 @@
--- Hex of Floating: a bolt that leaves the target hanging in the air with barely any control, and slows it down
+-- Hex of Floating (not in use: kept here, outside the spells folder Mercy loads): a bolt that leaves the target hanging
+-- in the air with barely any control, and slows it down
 local core = require('openmw.core')
 local RANGE = core.magic.RANGE
 local CHARACTER = require("scripts/MaxYari/MercyCAO/scripts/enums").CHARACTER_TYPE

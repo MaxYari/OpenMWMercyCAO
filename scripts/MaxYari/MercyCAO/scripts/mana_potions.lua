@@ -73,7 +73,8 @@ function module.onCombatStart(actor, chance, firstFightCaster, combatSpellCost, 
     cheapestCost = combatSpellCost
     for _, spellId in ipairs(customSpellIds) do
         local spell = core.magic.spells.records[spellId]
-        if spell and (not cheapestCost or spell.cost < cheapestCost) then cheapestCost = spell.cost end
+        local cost = spell and require("scripts/MaxYari/MercyCAO/scripts/magic_util").spellCost(spell)
+        if cost and (not cheapestCost or cost < cheapestCost) then cheapestCost = cost end
     end
     nextCheckAt = 0
     drinkAt = nil

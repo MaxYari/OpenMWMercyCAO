@@ -248,7 +248,7 @@ local state = {
       end
       return magicUtil.canAttemptCastNow(omwself, self.castables)
    end,
-   -- Whether Mercy can cast one of its custom spells (by key, e.g. "levitateBolt") right now. When it can't, the reason
+   -- Whether Mercy can cast one of its custom spells (by key, e.g. "slowBolt") right now. When it can't, the reason
    -- is left in castBlockReason for debug logging (see PeriodicCondition).
    canCastCustom = function(self, key)
       local spellId = self.customSpells[key]
@@ -287,6 +287,11 @@ local state = {
    customSpellActive = function(self, key)
       local spellId = self.customSpells[key]
       return spellId ~= nil and magicUtil.hasActiveSpellFrom(omwself, spellId, omwself.object)
+   end,
+   -- One of Mercy's custom spells is active on the enemy, whoever cast it
+   enemyHasCustomSpell = function(self, key)
+      local spellId = self.customSpells[key]
+      return spellId ~= nil and self.enemyActor ~= nil and magicUtil.hasActiveSpell(self.enemyActor, spellId)
    end,
    -- Dark enough for a light: any interior, or outside at night
    isDark = function(self)
@@ -714,6 +719,9 @@ local retreatedOnce = false
 local askedForMercyOnce = false
 -- Custom spells rolled on the first fight: key -> learned spell record id, or false. nil until rolled. Saved.
 local learnedCustomSpells = nil
+-- Learned custom spells casting another mod's record ('recordId') that the actor knew on its own before: key -> true.
+-- Taking Mercy's spells back leaves these. Saved.
+local nativeCustomSpells = {}
 local pitchSteered = false -- Pitch was changed while aiming and may still need levelling
 -- Simulation time of the last frame the engine was kept from attacking (see blockEngineAttack), for debug logging
 local engineAttackBlockedAt = -1
@@ -920,6 +928,8 @@ end
 -- Testing: spells from the player's "luamercy" console command, waiting to be learned. 'next' means they go to the next
 -- spellcaster that starts a fight rather than to this actor in particular.
 local pendingConsoleSpells = nil
+-- Spells came from the console since the last fight start, see prepareMagic
+local consoleSpellsGiven = false
 
 -- Per-frame combat work of the custom spells this actor knows (their 'combatUpdate'), run by the main loop in combat
 local spellCombatUpdates = {}
@@ -933,14 +943,79 @@ local function updateSpellCombatUpdates()
    end
 end
 
+-- Adds a custom spell's record to the actor's spells. Another mod's record ('recordId') the actor already knows on its
+-- own is only noted in nativeCustomSpells, so that taking Mercy's spells back leaves it. Changes to an actor's spells
+-- only apply at the end of the frame: the check is only right for a record not taken away earlier in the same frame.
+local function giveCustomSpell(key, spellId)
+   local actorSpells = types.Actor.spells(omwself)
+   if magicUtil.isBorrowedSpell(key) and actorSpells[spellId] then
+      nativeCustomSpells[key] = true
+      magicUtil.log("Custom spell", key, "was known already, Mercy will leave it")
+   else
+      nativeCustomSpells[key] = nil
+      actorSpells:add(spellId)
+   end
+end
+
+-- Takes a learned custom spell's record off the actor, unless it knew it on its own
+local function takeCustomSpell(key, spellId)
+   if not nativeCustomSpells[key] then pcall(function() types.Actor.spells(omwself):remove(spellId) end) end
+   nativeCustomSpells[key] = nil
+end
+
+-- Whether a spell record exists with all of its effects. A record Mercy made is saved with the game, so it can outlive
+-- the mod that added one of its effects (and another mod's record goes with its mod). Only says no when sure.
+local function isSpellIntact(spellId)
+   local ok, intact = pcall(function()
+      local spell = core.magic.spells.records[spellId]
+      if not spell then return false end
+      for _, effect in ipairs(spell.effects) do
+         if not core.magic.effects.records[effect.id] then return false end
+      end
+      return true
+   end)
+   return not ok or intact
+end
+
+-- Mercy's spells stay on the actor only while Mercy can cast them, checked as soon as the script loads. A learned spell
+-- that can't be used in this game now (its file is gone, a mod it needs isn't installed, or its record lost an effect
+-- along with its mod) is taken off, so that neither the engine's AI nor OSSC casts it without Mercy's cooldown, or picks
+-- a spell with a missing effect. It stays learned and is given back once it can be used again. A record the actor knew
+-- on its own is its own business.
+local function syncLearnedCustomSpells()
+   local actorSpells = types.Actor.spells(omwself)
+   for key, spellId in pairs(learnedCustomSpells or {}) do
+      if spellId and not nativeCustomSpells[key] then
+         local usable = magicUtil.isAvailable(key) and isSpellIntact(spellId)
+         local known = actorSpells[spellId] ~= nil
+         if not usable and known then
+            pcall(function() actorSpells:remove(spellId) end)
+            magicUtil.log("Custom spell", key, "can't be used in this game, taken off until it can")
+         elseif usable and not known then
+            actorSpells:add(spellId)
+            magicUtil.log("Custom spell", key, "can be used again, given back")
+         end
+      end
+   end
+end
+
 -- Replaces all of Mercy's custom spells this actor knows with the given keys, ready to cast
 local function learnCustomSpells(keys)
    local actorSpells = types.Actor.spells(omwself)
-   for _, learnedId in pairs(learnedCustomSpells or {}) do
-      if learnedId then pcall(function() actorSpells:remove(learnedId) end) end
+   local previous = learnedCustomSpells or {}
+   local wanted = {}
+   for _, key in ipairs(keys) do wanted[key] = true end
+   -- Another mod's record that stays is left as it is: taking it and giving it back in the same frame would find it
+   -- still there and take it for one the actor knows on its own
+   local function stays(key, spellId)
+      return wanted[key] and magicUtil.isBorrowedSpell(key) and spellId ~= nil and state.customSpells[key] == spellId
    end
-   for _, spellId in pairs(state.customSpells) do
-      pcall(function() actorSpells:remove(spellId) end)
+   for key, learnedId in pairs(previous) do
+      if learnedId and not stays(key, learnedId) then takeCustomSpell(key, learnedId) end
+   end
+   -- Any record of Mercy's own the actor has, learned or not. Not other mods' records: it may know those on its own.
+   for key, spellId in pairs(state.customSpells) do
+      if not magicUtil.isBorrowedSpell(key) then pcall(function() actorSpells:remove(spellId) end) end
    end
    pendingSpellHits = {}
    learnedCustomSpells = {}
@@ -949,7 +1024,7 @@ local function learnCustomSpells(keys)
       if not magicUtil.isAvailable(key) then
          magicUtil.log("Custom spell", key, "isn't available in this game, not learned")
       elseif spellId then
-         actorSpells:add(spellId)
+         if not stays(key, previous[key]) then giveCustomSpell(key, spellId) end
          learnedCustomSpells[key] = spellId
          state.customSpellCooldowns[key] = 0
          state.customSpellMisses[key] = 0
@@ -966,6 +1041,7 @@ local function learnConsoleSpells()
    local request = pendingConsoleSpells
    pendingConsoleSpells = nil
    learnCustomSpells(request.keys)
+   consoleSpellsGiven = true
    local text = "Mercy: " .. omwself.recordId .. " now knows " .. table.concat(request.keys, ", ")
    if request.player and request.player:isValid() then
       request.player:sendEvent("Mercy_ConsoleSpellsLearned", { actor = omwself.object, next = request.next, text = text })
@@ -994,11 +1070,14 @@ end
 -- can afford one, mana potions are drunk when it can't. OSSC takes an actor's spells out of its list while it runs the
 -- actor's casting, so the scan is done with them put back for the instant (magic_util.withOSSCSpellsRestored).
 local function scanOwnMagic()
-   -- Mercy's own spells don't count, old records of them (from before a version bump) included
+   -- Mercy's own spells don't count, old records of them (from before a version bump) included. Another mod's record (a
+   -- 'recordId' spell) only when Mercy gave it: one the actor knew on its own is its own spell.
    local ignored = {}
-   for _, spellId in pairs(state.customSpells) do ignored[spellId] = true end
-   for _, spellId in pairs(learnedCustomSpells or {}) do
-      if spellId then ignored[spellId] = true end
+   for key, spellId in pairs(state.customSpells) do
+      if not magicUtil.isBorrowedSpell(key) then ignored[spellId] = true end
+   end
+   for key, spellId in pairs(learnedCustomSpells or {}) do
+      if spellId and not nativeCustomSpells[key] then ignored[spellId] = true end
    end
    state.castables = magicUtil.withOSSCSpellsRestored(function()
       return magicUtil.scanCastables(omwself, ignored)
@@ -1018,7 +1097,6 @@ local function prepareMagic()
    -- A spellcaster has a casting class and knows spells of its own (Mercy's don't count)
    local isCaster = isSpellCaster and state.castables.knownSpellCount > 0
 
-   local actorSpells = types.Actor.spells(omwself)
    local firstFightCaster = false
    -- For the custom spell distribution: its level and what kind of character it is
    local function distributionNpc()
@@ -1060,16 +1138,23 @@ local function prepareMagic()
          magicUtil.log("Not a spellcaster, gets no custom spells")
       end
    else
-      -- The global script recreates a custom spell when its definition changes: swap the old record for the new one
+      -- The global script recreates a custom spell when its definition changes, or the definition moved to another
+      -- record ('recordId'): swap the old record for the new one
       for key, learnedId in pairs(learnedCustomSpells) do
          local currentId = state.customSpells[key]
          if learnedId and currentId and learnedId ~= currentId then
-            pcall(function() actorSpells:remove(learnedId) end)
-            actorSpells:add(currentId)
+            takeCustomSpell(key, learnedId)
+            giveCustomSpell(key, currentId)
             learnedCustomSpells[key] = currentId
             magicUtil.log("Updated custom spell", key, learnedId, "->", currentId)
          end
       end
+   end
+   -- Spells given through the console count as the NPC's first fight with Mercy's spells, caster or not: like a rolled
+   -- spellcaster or upgrade it gets a go at Mercy's magicka potions (a non-caster often has little magicka of its own)
+   if consoleSpellsGiven then
+      consoleSpellsGiven = false
+      firstFightCaster = next(learnedCustomSpells) ~= nil
    end
    for key, spellId in pairs(state.customSpells) do
       state.knownCustomSpells[key] = learnedCustomSpells[key] == spellId
@@ -1975,12 +2060,15 @@ return {
             aiEnabled and "engine" or "mercy", "| stance", selfActor:getDetailedStance())
       end,
       onSave = function()
-         return { warnsLeft = state.warnsLeft, learnedCustomSpells = learnedCustomSpells, manaPotions = manaPotions.save() }
+         return { warnsLeft = state.warnsLeft, learnedCustomSpells = learnedCustomSpells,
+            nativeCustomSpells = nativeCustomSpells, manaPotions = manaPotions.save() }
       end,
       onLoad = function(data)
          if data then
             state.warnsLeft = data.warnsLeft
             learnedCustomSpells = data.learnedCustomSpells
+            nativeCustomSpells = data.nativeCustomSpells or {}
+            syncLearnedCustomSpells()
             manaPotions.load(data.manaPotions)
          end
       end,
