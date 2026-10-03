@@ -510,29 +510,54 @@ local function forEachNearbyActor(distLimit, cb)
 end
 module.forEachNearbyActor = forEachNearbyActor
 
+-- The weapon's attack types, best average damage first. minDamage and maxDamage are what an attack deals at the lowest
+-- and the highest attack strength (see strengthForDamageShare).
 local function getSortedAttackTypes(weaponRecord)
     if weaponRecord then
         local attacks = {
-            { type = "Chop",   averageDamage = (weaponRecord.chopMinDamage + weaponRecord.chopMaxDamage) / 2 },
-            { type = "Slash",  averageDamage = (weaponRecord.slashMinDamage + weaponRecord.slashMaxDamage) / 2 },
-            { type = "Thrust", averageDamage = (weaponRecord.thrustMinDamage + weaponRecord.thrustMaxDamage) / 2 }
+            { type = "Chop",   minDamage = weaponRecord.chopMinDamage,   maxDamage = weaponRecord.chopMaxDamage },
+            { type = "Slash",  minDamage = weaponRecord.slashMinDamage,  maxDamage = weaponRecord.slashMaxDamage },
+            { type = "Thrust", minDamage = weaponRecord.thrustMinDamage, maxDamage = weaponRecord.thrustMaxDamage }
         }
+        for _, attack in ipairs(attacks) do attack.averageDamage = (attack.minDamage + attack.maxDamage) / 2 end
 
         table.sort(attacks, function(a, b) return a.averageDamage > b.averageDamage end)
 
         return attacks
     else
-        -- Assume this is hand-to-hand
+        -- Assume this is hand-to-hand. Its damage is the skill times a multiplier between these two
+        -- (getHandToHandDamage, combat.cpp), the same for every attack type.
+        local minDamage, maxDamage = core.getGMST("fMinHandToHandMult"), core.getGMST("fMaxHandToHandMult")
         local attacks = {
-            { type = "Chop",   averageDamage = 1 },
-            { type = "Slash",  averageDamage = 1 },
-            { type = "Thrust", averageDamage = 1 }
+            { type = "Chop",   averageDamage = 1, minDamage = minDamage, maxDamage = maxDamage },
+            { type = "Slash",  averageDamage = 1, minDamage = minDamage, maxDamage = maxDamage },
+            { type = "Thrust", averageDamage = 1, minDamage = minDamage, maxDamage = maxDamage }
         }
         return attacks
     end
 end
 
 module.getSortedAttackTypes = getSortedAttackTypes
+
+-- The lowest attack strength (how far the attack was wound up, 0 to 1) at which an attack deals at least 'share' of
+-- its full damage. An attack deals minDamage + (maxDamage - minDamage) * strength (Npc::hit, npc.cpp), so with a wide
+-- spread like 1-60 a barely wound up attack does next to nothing.
+local function strengthForDamageShare(attack, share)
+    local minDamage, maxDamage = attack.minDamage or 0, attack.maxDamage or 0
+    if maxDamage <= minDamage then return 0 end
+    return util.clamp((share * maxDamage - minDamage) / (maxDamage - minDamage), 0, 1)
+end
+
+module.strengthForDamageShare = strengthForDamageShare
+
+-- Whether an actor gets right something that takes weapon mastery: from no chance at skill 0 up to 90% at 75 and
+-- above, times 'factor' (optional, e.g. lower under stress)
+local function masteryRoll(skill, factor)
+    local chance = util.clamp(util.remap(skill, 0, 75, 0, 100), 0, 90) * (factor or 1)
+    return math.random() * 100 < chance
+end
+
+module.masteryRoll = masteryRoll
 
 local function getGoodAttacks(attacks)
     local bestAttack = attacks[1]

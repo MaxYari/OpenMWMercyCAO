@@ -1838,12 +1838,15 @@ I.AnimationController.addTextKeyHandler(nil, function(groupname, key)
    if string.find(key, "chop start") or string.find(key, "thrust start") or string.find(key, "slash start")
       or string.find(key, "shoot start") then
       setAttackState(enums.ATTACK_STATE.WINDUP_START, groupname)
+      -- The attack type the animation plays ("chop", ...), for measuring the wind-up (see StartSmallAttack)
+      state.attackKeyType = string.match(key, "^%a+")
    end
 
    -- Animation compilation has min and max attack on a same keyframe due to which they might arrive out of order. So avoid setting MIN state
    -- if higher state is already set
    if string.find(key, "min attack") and state.attackState < enums.ATTACK_STATE.WINDUP_MIN then
       setAttackState(enums.ATTACK_STATE.WINDUP_MIN, groupname)
+      state.attackKeyType = string.match(key, "^%a+")
    end
 
    if string.find(key, "max attack") then

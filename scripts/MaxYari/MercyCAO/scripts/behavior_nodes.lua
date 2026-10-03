@@ -357,6 +357,63 @@ end
 
 BT.register('JumpInDirection', JumpInDirection)
 
+-- Small attacks (StartSmallAttack) are where the wind-up matters: an attack deals min + (max - min) * strength, so one
+-- released as soon as it can be does next to nothing with a weapon like a 1-60 dai-katana. With enough weapon mastery
+-- at the moment (a roll on the weapon skill) a small attack is wound up just enough to still deal
+-- CONCENTRATED_DAMAGE_SHARE of a full attack's damage, otherwise it's released at once as a reckless swipe. Going ham
+-- the fighter is angry and stressed, and HAM_MASTERY_FACTOR times as likely to concentrate.
+local CONCENTRATED_DAMAGE_SHARE = 0.66
+local HAM_MASTERY_FACTOR = 0.5
+
+-- Times of the "min attack" and "max attack" keys in an attack's animation group, by "<group>: <attack type>". Looking
+-- a key up scans all of the actor's text keys, so it's done once per group and attack type. false when the keys can't
+-- be used: missing, or both on the same frame (the engine then rolls a random strength, there's nothing to aim for).
+local windUpKeyTimes = {}
+local function getWindUpKeyTimes(group, attackType)
+    local key = group .. ": " .. attackType
+    local times = windUpKeyTimes[key]
+    if times == nil then
+        local minTime = animation.getTextKeyTime(omwself, key .. " min attack")
+        local maxTime = animation.getTextKeyTime(omwself, key .. " max attack")
+        times = (minTime and maxTime and minTime < maxTime) and { minTime, maxTime } or false
+        windUpKeyTimes[key] = times
+    end
+    return times
+end
+
+-- How far the current attack is wound up, 0 to 1: the strength it would have if released now, worked out the way the
+-- engine does it (calculateWindUp, character.cpp). nil when it can't be measured.
+local function attackWindUp(state)
+    if not (state.attackGroup and state.attackKeyType) then return nil end
+    local times = getWindUpKeyTimes(state.attackGroup, state.attackKeyType)
+    if not times then return nil end
+    local now = animation.getCurrentTime(omwself, state.attackGroup)
+    if not now then return nil end
+    return util.clamp((now - times[1]) / (times[2] - times[1]), 0, 1)
+end
+
+local function findAttack(attacks, attackType)
+    for _, attack in ipairs(attacks) do
+        if string.lower(attack.type) == attackType then return attack end
+    end
+    return nil
+end
+
+-- Whether the attack is wound up far enough to be released. Only a concentrated small attack waits, for the strength
+-- worked out once it passes "min attack", from the attack type the animation plays.
+local function woundUpEnough(task, state)
+    if not task.concentrated then return true end
+    if task.targetStrength == nil then
+        local attack = findAttack(state.weaponAttacks, state.attackKeyType) or task.attack
+        task.targetStrength = gutils.strengthForDamageShare(attack, CONCENTRATED_DAMAGE_SHARE)
+        gutils.print("Concentrated small attack:", attack.type, attack.minDamage, "-", attack.maxDamage, "wound up to",
+            string.format("%.2f", task.targetStrength), 2)
+    end
+    if task.targetStrength <= 0 then return true end
+    local windUp = attackWindUp(state)
+    return windUp == nil or windUp >= task.targetStrength
+end
+
 function StartAttack(config)
     config.start = function(self, state)
         self.frame = 0
@@ -372,9 +429,8 @@ function StartAttack(config)
         local attack
 
         local skill = state.weaponSkill
-        local prob = util.clamp(util.remap(skill, 0, 75, 0, 100), 0, 90)
 
-        if math.random() * 100 < prob then
+        if gutils.masteryRoll(skill) then
             -- if random less than weapon skill (rescale to 0-75 skill, and clamp chance to 0-90)
             attack = gutils.pickWeightedRandomAttackType(goodAttacks)
         else
@@ -384,6 +440,17 @@ function StartAttack(config)
 
         -- self.attack_type = 5 -- for testing
         self.attack_type = omwself.ATTACK_TYPE[attack.type]
+        self.attack = attack
+
+        -- A small attack rolls whether it's concentrated (see CONCENTRATED_DAMAGE_SHARE)
+        self.concentrated = false
+        self.targetStrength = nil
+        if config.successAttackState == enums.ATTACK_STATE.WINDUP_MIN then
+            self.concentrated = gutils.masteryRoll(skill, state.inHamMode and HAM_MASTERY_FACTOR or 1)
+            if not self.concentrated then
+                gutils.print("Reckless small attack, skill", skill, state.inHamMode and "(going ham)" or "", 2)
+            end
+        end
 
         state.attack = self.attack_type
     end
@@ -398,7 +465,7 @@ function StartAttack(config)
                 return self:fail()
             end
 
-            if state.attackState >= config.successAttackState then
+            if state.attackState >= config.successAttackState and woundUpEnough(self, state) then
                 return self:success()
             end
 
