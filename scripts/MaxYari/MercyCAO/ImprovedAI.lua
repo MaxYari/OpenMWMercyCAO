@@ -103,6 +103,9 @@ local isGuard = selfActor:isAGuard()
 -- Has a casting class (a magic school among its major skills, or a vampire). A spellcaster also has to know spells of
 -- its own, see prepareMagic.
 local isSpellCaster = selfActor:isSpellCaster()
+-- Quick weapons (fists, short blades, katars and knuckledusters, see isQuickWeapon) roll their attack bursts as if their
+-- wielder were this much more skilled (see attacksFromSkill)
+local QUICK_WEAPON_BURST_SKILL_BONUS = 20
 -- Data containers
 local bTrees = nil
 local blacklist = nil
@@ -441,7 +444,8 @@ local state = {
    end,
    attacksFromSkill = function(self)
       if not self.weaponSkill then return math.random(1, 2) end
-      local skill = self.weaponSkill
+      -- A quick weapon makes longer bursts likelier: it rolls with a bonus to the skill
+      local skill = self.weaponSkill + (self.quickWeapon and QUICK_WEAPON_BURST_SKILL_BONUS or 0)
       local n = 1
       if skill >= 75 then
          n = math.random(2, 4)
@@ -478,6 +482,31 @@ local state = {
 -----------------------------------------------------------------------------------
 local function isBlacklisted(blist)
    return (blist.recordIdsMap[omwself.recordId] or blist.cellIdsMap[omwself.cell.id])
+end
+
+-- Katars & Knuckles tells which of its weapons are swung like fists, its katars and knuckledusters (to the engine a
+-- knuckleduster is just a blunt weapon), through its interface on this NPC
+local function isFistWeapon(weaponObj)
+   local h2hWeapons = I.H2HWeapons
+   if not (h2hWeapons and h2hWeapons.hybridOfItem) then return false end
+   local hybrid = h2hWeapons.hybridOfItem(weaponObj)
+   return type(hybrid) == "table" and hybrid.handToHand == true
+end
+
+-- Quick weapons get longer attack bursts (see attacksFromSkill): fists, short blades (daggers, shortswords, katars), and
+-- Katars & Knuckles' fist weapons
+local function isQuickWeapon(weaponObj, weaponRecord)
+   if not weaponRecord.id then return true end
+   return weaponRecord.type == types.Weapon.TYPE.ShortBladeOneHand or isFistWeapon(weaponObj)
+end
+
+-- Hlaalu guards are always weird and jumpy (see randomiseInclinations): any guard of House Hlaalu, Tamriel Rebuilt's too
+local function isHlaaluGuard()
+   if not isGuard then return false end
+   for _, factionId in pairs(types.NPC.getFactions(omwself)) do
+      if string.lower(factionId) == "hlaalu" then return true end
+   end
+   return false
 end
 
 -- Which way each inclination moves has a seeded stream of its own, so the rolls taken from luaRandom (spread, weirdness,
@@ -521,6 +550,13 @@ local function randomiseInclinations()
       end
    else
       state.weirdnessStatus = "completely normal, not weird at all."
+   end
+
+   -- Hlaalu guards are always weird and jumpy, a trademark of theirs. Rolled, only the guards of one record had it (by
+   -- the luck of their seed). Set without taking a roll, so nothing else they rolled changes.
+   if isHlaaluGuard() then
+      state.weirdnessStatus = "oh, it's weird! (a Hlaalu guard)"
+      state.jumpInc = math.max(state.jumpInc, 75)
    end
 
    local anger = luaRandom:random()
@@ -1221,7 +1257,7 @@ local function STARTEVERYTHING(BTJsonData)
    -- Ready to use! -----------------------------------------------------------
 
    -- Rndomising key npc factors
-   -- Guards are seeded by their record, so every guard of a kind behaves the same (all Hlaalu guards jump); everyone
+   -- Guards are seeded by their record, so every guard of a kind behaves the same; everyone
    -- else by npcSeedKey, so each NPC is its own. The inclinations' directions follow the same rule, the magic stream
    -- is always per NPC.
    local seedKey = npcSeedKey()
@@ -1566,6 +1602,7 @@ local function onUpdate(dt)
          state.weaponSkill = selfActor:getSkillStat("handtohand").modified
          state.reach = fHandToHandReach * fCombatDistance * 0.95
       end
+      state.quickWeapon = isQuickWeapon(weaponObj, weaponRecord)
       lastWeaponRecord = weaponRecord
    end
 
