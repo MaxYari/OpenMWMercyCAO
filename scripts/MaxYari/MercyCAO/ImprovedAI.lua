@@ -488,8 +488,8 @@ end
 -- knuckleduster is just a blunt weapon), through its interface on this NPC
 local function isFistWeapon(weaponObj)
    local h2hWeapons = I.H2HWeapons
-   if not (h2hWeapons and h2hWeapons.hybridOfItem) then return false end
-   local hybrid = h2hWeapons.hybridOfItem(weaponObj)
+   if not (h2hWeapons and h2hWeapons.getHybridDefForItem) then return false end
+   local hybrid = h2hWeapons.getHybridDefForItem(weaponObj)
    return type(hybrid) == "table" and hybrid.handToHand == true
 end
 
