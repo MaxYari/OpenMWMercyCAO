@@ -128,11 +128,10 @@ local function say(actor, targetActor, recordType, force)
     local lastPickedIndex = lastPickedIndices[recordType]
     local availableIndices = {}
     for i, info in ipairs(fittingInfos) do
-        if info.targetGender and info.targetGender ~= targetGender then goto continue end
-        if i == lastPickedIndex and #fittingInfos > 1 then goto continue end
+        local wrongGender = info.targetGender and info.targetGender ~= targetGender
+        local justPlayed = i == lastPickedIndex and #fittingInfos > 1
 
-        table.insert(availableIndices, i)
-        ::continue::
+        if not wrongGender and not justPlayed then table.insert(availableIndices, i) end
     end
 
     if #availableIndices == 0 then

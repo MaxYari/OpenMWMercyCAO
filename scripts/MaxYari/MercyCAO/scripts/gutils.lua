@@ -368,10 +368,11 @@ function Actor:getDumpableInventoryItems(excludedIds)
     local invItems = inventory:getAll()
 
     for i, item in pairs(invItems) do
-        if excludedIds and excludedIds[item.recordId] then goto continue end
-        if (types.Armor.objectIsInstance(item) or types.Clothing.objectIsInstance(item)) and self:hasEquipped(item) then goto continue end
-        table.insert(items, item)
-        ::continue::
+        local dumpable = not (excludedIds and excludedIds[item.recordId])
+        if dumpable and (types.Armor.objectIsInstance(item) or types.Clothing.objectIsInstance(item)) then
+            dumpable = not self:hasEquipped(item)
+        end
+        if dumpable then table.insert(items, item) end
     end
 
     return items

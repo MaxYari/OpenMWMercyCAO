@@ -277,18 +277,18 @@ local function NavigationService(config)
             end
             -- Looking for nearby obstacles
             for index, gameObject in ipairs(nearby.actors) do
-                if opts.ignoredObstacleObject and opts.ignoredObstacleObject.id == gameObject.id then goto continue end
-                if gameObject.id == omwself.id then goto continue end
-                if types.Actor.isDead(gameObject) then goto continue end
+                local ignored = (opts.ignoredObstacleObject and opts.ignoredObstacleObject.id == gameObject.id)
+                    or gameObject.id == omwself.id
+                    or types.Actor.isDead(gameObject)
 
-                local obstacle = Obstacle:new(gameObject)
-                if obstacle:isValid(desiredDirection) then
-                    if not self.closestObs or obstacle:distance() < self.closestObs:distance() then
-                        self.closestObs = obstacle
+                if not ignored then
+                    local obstacle = Obstacle:new(gameObject)
+                    if obstacle:isValid(desiredDirection) then
+                        if not self.closestObs or obstacle:distance() < self.closestObs:distance() then
+                            self.closestObs = obstacle
+                        end
                     end
                 end
-
-                ::continue::
             end
             -- Trying to avoid the obstacle
             if self.closestObs then

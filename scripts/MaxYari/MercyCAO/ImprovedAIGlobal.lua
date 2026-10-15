@@ -241,7 +241,6 @@ local eventHandlers = {
                 item:teleport(data.actorObject.cell, data.position, { onGround = true })
                 item.owner.factionId = nil
                 item.owner.recordId = nil
-                ::continue::
             end
         end,
         openTheDoor = function(data)
