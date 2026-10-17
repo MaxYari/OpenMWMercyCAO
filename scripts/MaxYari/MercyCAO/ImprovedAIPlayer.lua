@@ -2,6 +2,15 @@ mp = "scripts/MaxYari/MercyCAO/"
 
 local core = require("openmw.core")
 local ui = require("openmw.ui")
+
+-- OpenMW version check: Mercy needs OpenMW 0.51 (Lua API revision 129) or newer. Checked before anything else loads.
+-- The NPC and global scripts stop quietly, this one tells the user.
+if core.API_REVISION < 129 then
+    print("[Mercy: CAO] ERROR: Mercy needs OpenMW 0.51 or newer, this OpenMW's Lua API revision is "
+        .. core.API_REVISION .. ". Mercy is disabled, please upgrade OpenMW.")
+    return ui.showMessage("Mercy: CAO needs OpenMW 0.51 or newer and is disabled. Please upgrade OpenMW.")
+end
+
 local nearby = require("openmw.nearby")
 local omwself = require("openmw.self")
 local selfObject = omwself.object
@@ -10,11 +19,7 @@ local types = require("openmw.types")
 local gutils = require(mp .. "scripts/gutils")
 local selfActor = gutils.Actor:new(omwself)
 
-DebugLevel = 2
-
-if core.API_REVISION < 64 then
-    return ui.showMessage("Mercy: CAO requiers a newer version of OpenMW, please update.")
-end
+DebugLevel = gutils.debugLevel()
 
 gutils.print("Hi! Mercy: CAO BETA is now E-N-G-A-G-E-D", 0)
 

@@ -1,5 +1,10 @@
 mp = "scripts/MaxYari/MercyCAO/"
 
+-- OpenMW version check: Mercy needs OpenMW 0.51 (Lua API revision 129) or newer. Checked before anything else loads, the
+-- player script tells the user.
+local core = require('openmw.core')
+if core.API_REVISION < 129 then return end
+
 -- Mod files
 local gutils = require(mp .. "scripts/gutils")
 local moveutils = require(mp .. "scripts/movementutils")
@@ -14,18 +19,11 @@ local manaPotions = require(mp .. "scripts/mana_potions")
 -- OpenMW libs
 local omwself = require('openmw.self')
 local selfActor = gutils.Actor:new(omwself)
-local core = require('openmw.core')
 local AI = require('openmw.interfaces').AI
 local util = require('openmw.util')
 local types = require('openmw.types')
 local I = require('openmw.interfaces')
 local storage = require('openmw.storage')
-
--- OpenMW API Version check
-if core.API_REVISION < 64 then
-   error(
-      "Can not start Mercy: CAO, newer version of lua API is required. Please update OpenMW.")
-end
 
 -- 3rd party libs
 -- Setup important global functions for the behaviourtree 2e module to use--
@@ -40,8 +38,8 @@ local luaRandom = require(mp .. "libs/randomlua")
 
 
 
---- To be or not to be!? ---
-DebugLevel = 0
+--- To be or not to be!? --- (the Debug Logging Level setting)
+DebugLevel = gutils.debugLevel()
 ----------------------------
 
 --- Init custom behaviour nodes
@@ -150,6 +148,10 @@ local state = {
    hitReactMove = false,    -- Locomotion: fall back or close in
    hitReactAttack = false,  -- Combat: maybe wind up an attack
    hitReactAt = nil,        -- Simulation time of the attack, see hitReactFresh
+
+   -- In werewolf form: never warns, surrenders or uses magic, and growls instead of talking. Checked once on combat
+   -- start, so a wild werewolf changing form mid-fight keeps the form it started the fight in.
+   isWerewolf = false,
 
    -- Warning (STAND_GROUND) fields, updated by the main loop
    warnsLeft = nil,         -- Patience: how many more times this NPC will warn instead of fighting. Rolled once and saved.
@@ -510,7 +512,7 @@ local function isHlaaluGuard()
 end
 
 -- Which way each inclination moves has a seeded stream of its own, so the rolls taken from luaRandom (spread, weirdness,
--- going ham) keep their order and NPCs keep the personalities they already had. Seeded in STARTEVERYTHING.
+-- going ham) keep their order and NPCs keep the personalities they already had. Seeded in finishStartup.
 local inclinationRandom = setmetatable({ a = 1103515245, c = 12345, m = 0x10000, x = 0 }, getmetatable(luaRandom))
 
 local function randomiseInclinations()
@@ -859,7 +861,7 @@ end
 -- what Mercy is doing - mid attack burst, while Mercy casts one of its own spells, while repositioning, and during
 -- every routine that isn't a straight fight (warning, investigating, sneaking up, hiding, retreating, surrendering).
 local function updateOSSCHold()
-   local hold = state.combatState ~= enums.COMBAT_STATE.FIGHT
+   local hold = state.combatState ~= enums.COMBAT_STATE.FIGHT or state.isWerewolf
       or state.inAttackSequence or state.magicBusy or state.castingCustom or state.repositioning
    magicUtil.osscSetPaused(hold)
 end
@@ -924,7 +926,7 @@ local lastFleeValue = selfActor:aiFleeStat().modified
 
 -- Rolls whether to warn the enemy (STAND_GROUND) rather than fight, only while the NPC still has patience left
 local function rollWarn(enemyActor, damageValue)
-   if state.warnsLeft <= 0 or isGuard or damageValue > 0 then return false end
+   if state.warnsLeft <= 0 or isGuard or state.isWerewolf or damageValue > 0 then return false end
    local fightValue = selfActor:aiFightStat().modified + gutils.getFightDispositionBias(omwself, enemyActor)
    -- 90% at fight value 85 or less, down to 20% at 97 and above, scaled by the Stand Back Modifier setting
    local standGroundProb = util.clamp(util.remap(fightValue, 85, 100, 0.9, 0), 0.2, 0.9) * StandGroundProbModifier
@@ -1096,7 +1098,7 @@ end
 
 -- The rolls that decide an NPC's magic - whether it gets Mercy's spells, which ones, how many potions - have a stream of
 -- their own, seeded per NPC (guards too): copies of one record roll separately, and these rolls can't shift the
--- inclinations stream (luaRandom) or be shifted by it. Seeded in STARTEVERYTHING.
+-- inclinations stream (luaRandom) or be shifted by it. Seeded in finishStartup.
 local magicRandom = setmetatable({ a = 1103515245, c = 12345, m = 0x10000, x = 0 }, getmetatable(luaRandom))
 local function magicRoll()
    return magicRandom:random()
@@ -1129,6 +1131,17 @@ local function prepareMagic()
    -- Clearing it here means a new fight never starts with magic locked out.
    state.inAttackSequence = false
    magicUtil.osscResetHold()
+   if state.isWerewolf then
+      -- A werewolf can't cast or drink: no magic this fight, Mercy's spells included. The rolls for Mercy's spells
+      -- wait for a fight in human form.
+      state.castables = { knownSpellCount = 0, combatSpellCount = 0, hasItems = false, canUseMagic = false }
+      for key in pairs(state.customSpells) do state.knownCustomSpells[key] = false end
+      updateSpellCombatUpdates()
+      -- No spell cost: nothing to drink potions for, and a drink scheduled in an earlier fight is dropped
+      manaPotions.onCombatStart(omwself.object, 0, false, nil, {}, magicRoll)
+      magicUtil.log("Werewolf: no magic this fight")
+      return
+   end
    scanOwnMagic()
    -- A spellcaster has a casting class and knows spells of its own (Mercy's don't count)
    local isCaster = isSpellCaster and state.castables.knownSpellCount > 0
@@ -1226,29 +1239,50 @@ end
 
 
 ----------------------------------------------------------------
--- Ask Global script to provide all the necessary json and config data, its response will trigger a STARTEVERYTHING method below
-core.sendGlobalEvent("HiImMercyActor",{source = omwself})
-----------------------------------------------------------------
-----------------------------------------------------------------
+-- Startup: when this NPC enters the scene it asks the global script for the behaviour tree project and config data
+-- (requestStartup, from onActive). The global script hands them out to one NPC at a time, nearest to the player first,
+-- and the trees are built from them a few milliseconds per frame (stepBuild) so a town full of NPCs doesn't stall the
+-- game. Until its trees are built the NPC is left to vanilla AI.
+-- A request is out with the global script and its data hasn't arrived yet
+local startupRequested = false
+-- The coroutine building the trees while it's under way, resumed every frame by onUpdate
+local buildThread = nil
+-- Blacklisted from Mercy (full_disable): never asks again
+local mercyBlacklisted = false
+-- Seconds of tree building per frame
+local BUILD_BUDGET = 0.003
+-- The clock is read every few nodes rather than after each one
+local BUILD_CLOCK_EVERY = 8
+local buildSliceEnd = 0
+local nodesSinceClockCheck = 0
+-- Defined further down, finishStartup calls it
+local onTargetsChanged
 
+local function requestStartup()
+   if bTrees or buildThread or startupRequested or mercyBlacklisted then return end
+   startupRequested = true
+   core.sendGlobalEvent("HiImMercyActor", { source = omwself })
+end
 
--- A function that will initialise all behavior trees on a first update. Done on a first update so other mods have a chance to provide extensions
--- via the interface
-local function STARTEVERYTHING(BTJsonData)
-   if isBlacklisted(blacklist.full_disable) then
-      gutils.print(omwself.recordId," is BLACKLISTED from starting Mercy:CAO, Mercy will not start", 1)
-      return
+-- Tells the global script to stop waiting for this NPC: drops its request, and frees the build slot if it held it
+local function releaseStartup()
+   core.sendGlobalEvent("Mercy_StartupRelease", { source = omwself })
+end
+
+-- Called for every node the tree builder parses: pauses the build when this frame's budget is spent
+local function onNodeParsed(nodeConfig, treeData)
+   -- Inject extensions (child nodes) into parent node's initialisation data if need be
+   maybeInjectExtensions(nodeConfig, treeData.title)
+   nodesSinceClockCheck = nodesSinceClockCheck + 1
+   if nodesSinceClockCheck >= BUILD_CLOCK_EVERY then
+      nodesSinceClockCheck = 0
+      if core.getRealTime() >= buildSliceEnd then coroutine.yield() end
    end
+end
 
-   gutils.print(omwself.recordId," Passed a blacklist check - starting", 1)
-   
-   -- STARTING EVERYTHING -------------------
-   -- Initialise behaviour trees ----------------------------------------------
-   bTrees = BT.LoadBehavior3Project(BTJsonData, state, function(nodeConfig, treeData)
-      -- Inject extensions (child nodes) into parent node's initialisation data if need be
-      maybeInjectExtensions(nodeConfig, treeData.title)
-   end)
-
+-- Everything else Mercy sets up once the trees are built
+local function finishStartup(builtTrees)
+   bTrees = builtTrees
    checkExtensionsWarning()
 
    bTrees.Combat:setDebugLevel(0)
@@ -1278,6 +1312,63 @@ local function STARTEVERYTHING(BTJsonData)
       gutils.print(omwself.recordId," Is BLACKLISTED from surrendering (blacklist match or is a guard).", 1)
       ScaredProbModifier = 0
    end
+
+   releaseStartup()
+   -- Combat targets otherwise only arrive when they change: an NPC already fighting when Mercy starts on it (a save
+   -- loaded mid-fight, or startup reaching it a few frames into a fight) would be left to vanilla AI for that fight
+   if I.MSS and I.MSS.getCombatTargets then onTargetsChanged({ targets = I.MSS.getCombatTargets() }) end
+end
+
+-- Debug logging (level 1): when the build started, the time spent building and in how many frames
+local buildStartedAt, buildWorkTime, buildSlices = 0, 0, 0
+
+-- Builds the trees for up to 'budget' seconds, and finishes the startup once they're done
+local function stepBuild(budget)
+   local sliceStart = core.getRealTime()
+   buildSliceEnd = sliceStart + budget
+   local ok, result = coroutine.resume(buildThread)
+   if DebugLevel >= 1 then
+      buildWorkTime = buildWorkTime + core.getRealTime() - sliceStart
+      buildSlices = buildSlices + 1
+   end
+   if not ok then
+      buildThread = nil
+      releaseStartup()
+      error(result, 0)
+   end
+   if coroutine.status(buildThread) == "dead" then
+      buildThread = nil
+      if DebugLevel >= 1 then
+         gutils.print(string.format(
+            "Finished compiling behaviour trees - compilation time is %.1f ms (%d frames, %.0f ms from start to finish)",
+            buildWorkTime * 1000, buildSlices, (core.getRealTime() - buildStartedAt) * 1000), 1)
+      end
+      finishStartup(result)
+   end
+end
+
+-- Starts building the trees from the global script's startup data. Done over several frames, so other mods also still
+-- have a chance to provide extensions via the interface.
+local function beginStartup(BTJsonData)
+   if isBlacklisted(blacklist.full_disable) then
+      gutils.print(omwself.recordId," is BLACKLISTED from starting Mercy:CAO, Mercy will not start", 1)
+      mercyBlacklisted = true
+      releaseStartup()
+      return
+   end
+
+   if DebugLevel >= 1 then
+      gutils.print("Passed a blacklist check - started compiling behaviour trees", 1)
+      buildStartedAt, buildWorkTime, buildSlices = core.getRealTime(), 0, 0
+   end
+
+   -- STARTING EVERYTHING -------------------
+   -- Initialise behaviour trees ----------------------------------------------
+   nodesSinceClockCheck = 0
+   -- Built from onUpdate on, a slice per frame
+   buildThread = coroutine.create(function()
+      return BT.LoadBehavior3Project(BTJsonData, state, onNodeParsed)
+   end)
 end
 
 
@@ -1303,6 +1394,9 @@ local engineHitGroups = {}
 
 local function onUpdate(dt)
    if dt <= 0 then return end
+
+   -- Startup still building the trees (only for the few frames that takes)
+   if buildThread then stepBuild(BUILD_BUDGET) end
 
    -- Mercy is taking a rest if another mod disabled it
    if interface.enabled == false then return end
@@ -1441,6 +1535,8 @@ local function onUpdate(dt)
    -- When we switch to combat - determine if we want to be hesitant (stand ground) or engage right away
    if lastAiPackage.type ~= activeAiPackage.type and activeAiPackage.type == "Combat" then
       magicUtil.log("COMBAT STARTED with", enemyActor and enemyActor.recordId or "no enemy", "| stance", detStance)
+      state.isWerewolf = types.NPC.isWerewolf(omwself)
+      voiceManager.setWerewolf(state.isWerewolf)
       prepareMagic()
       -- Initialising combat state
       if enemyActor then                 
@@ -1504,7 +1600,7 @@ local function onUpdate(dt)
    if mercyScared then
       local potentialStates = {}
       if not retreatedOnce then table.insert(potentialStates, enums.COMBAT_STATE.RETREAT) end
-      if not askedForMercyOnce and not fightingACreature then table.insert(potentialStates, enums.COMBAT_STATE.MERCY) end
+      if not askedForMercyOnce and not fightingACreature and not state.isWerewolf then table.insert(potentialStates, enums.COMBAT_STATE.MERCY) end
       if #potentialStates > 0 then
          local newState = potentialStates[math.random(1, #potentialStates)]
          state.combatState = newState
@@ -2006,7 +2102,8 @@ local function isPlayerInTargets(targets)
    return false
 end
 
-local function onTargetsChanged(e)
+-- (Declared above: startup calls it)
+function onTargetsChanged(e)
    combatTargets = e.targets
    if not combatTargets then combatTargets = {} end
    if magicUtil.DEBUG_LOGGING then
@@ -2044,14 +2141,23 @@ local eventHandlers = {
    -- Own combat targets, sent to this actor by Max Yari's Script Services (MSS) whenever they change
    MSS_CombatTargets = onTargetsChanged,
    Mercy_StartupData = function(e)
+      startupRequested = false
+      -- A second copy (it asked again while the first was on its way): a build under way frees the slot when it's done
+      if bTrees or buildThread then
+         if bTrees then releaseStartup() end
+         return
+      end
+      -- Left the scene the frame it was sent: no building out there, it asks again when it's back (onActive)
+      if not omwself:isActive() then
+         releaseStartup()
+         return
+      end
       gutils.print(omwself.recordId," Received startup data from Global", 1)
       blacklist = e.blacklist
       state.itemDumpExclusions = blacklist.item_dump_disable.recordIdsMap
+      voiceManager.setBlacklist(blacklist.voice_disable)
       state.customSpells = e.customSpells or {}
-      STARTEVERYTHING(e.b3projectJson)
-      -- Combat targets otherwise only arrive when they change: an NPC already fighting when Mercy starts on it (a save
-      -- loaded mid-fight, or startup reaching it a few frames into a fight) would be left to vanilla AI for that fight
-      if I.MSS and I.MSS.getCombatTargets then onTargetsChanged({ targets = I.MSS.getCombatTargets() }) end
+      beginStartup(e.b3projectJson)
    end,
    FriendDamaged = function(...)
       Events:emit("FriendDamaged", ...)
@@ -2093,6 +2199,17 @@ end
 return {
    engineHandlers = {
       onUpdate = onUpdate,
+      -- Startup is asked for whenever the NPC enters the scene and isn't started yet. A script woken up out of the scene
+      -- (by an event, OpenMW 0.51 reloads unloaded scripts for that) never asks.
+      onActive = requestStartup,
+      -- Out of the scene the NPC stops updating: the global script stops waiting for it. A build under way carries on
+      -- if it's back before OpenMW unloads its script, a request is made again on onActive.
+      onInactive = function()
+         if startupRequested or buildThread then
+            startupRequested = false
+            releaseStartup()
+         end
+      end,
       -- Debug: anything this NPC consumes (a potion drunk by Mercy or by the engine's AI)
       onConsume = function(item)
          state.consumedAt = core.getSimulationTime()

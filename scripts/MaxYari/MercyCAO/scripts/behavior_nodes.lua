@@ -330,12 +330,12 @@ function JumpInDirection(config)
         local canMove, reason = state.navService:canMoveInDirection(moveDir, types.Actor.getRunSpeed(omwself))
 
         if not canMove then
-            gutils.print("Jump aborted due to: " .. reason)
+            gutils.print("Jump aborted due to: " .. reason, 2)
             return self:fail()
         end
 
         if now - self.startedAt >= self.warmupTime and selfActor:isOnGround() then
-            gutils.print("Jump is finished since actor is on ground")
+            gutils.print("Jump is finished since actor is on ground", 2)
             return self:success()
         end
 

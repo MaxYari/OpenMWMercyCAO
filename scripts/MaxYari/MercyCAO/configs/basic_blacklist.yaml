@@ -41,4 +41,10 @@ surrender_disable:
     - sterdecan        
   cellIds:
     - exampleCellId
+
+voice_disable:
+  recordIds:
+    - exampleIdA
+  cellIds:
+    - exampleCellId
     

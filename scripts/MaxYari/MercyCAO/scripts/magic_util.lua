@@ -10,8 +10,8 @@ local selfOk, omwself = pcall(require, 'openmw.self')
 local module = {}
 
 -- Debug logging ---------------------------------------------------------------------------------------------------
--- Debug logging of Mercy's magic, hiding and detection decisions
-module.DEBUG_LOGGING = false
+-- Debug logging of Mercy's magic, hiding and detection decisions: Debug Logging Level 3
+module.DEBUG_LOGGING = require("scripts/MaxYari/MercyCAO/scripts/gutils").debugLevel() >= 3
 
 function module.log(...)
     if not module.DEBUG_LOGGING then return end

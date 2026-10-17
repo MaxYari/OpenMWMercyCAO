@@ -1,6 +1,7 @@
 local core = require('openmw.core')
 local types = require('openmw.types')
 local util = require('openmw.util')
+local storage = require('openmw.storage')
 local omwstatus, omwself = pcall(require, "openmw.self")
 local nrbstatus, nearby = pcall(require, "openmw.nearby")
 
@@ -30,6 +31,11 @@ local function uprint(...)
     end
 end
 module.print = uprint
+
+-- The Debug Logging Level setting (0 - 3, see settingsPageGlobal.lua): what the scripts set DebugLevel to when they load
+function module.debugLevel()
+    return storage.globalSection('SettingsMercyCAODebug'):get('DebugLevel') or 0
+end
 
 local function foundInList(list, item)
     -- Author: ChatGPT 2024

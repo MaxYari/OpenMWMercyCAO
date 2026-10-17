@@ -72,7 +72,7 @@ Furthermore, only 1/3 of those get an "Exotic" spell
 
 ## ☮ How to install
 
-- **Requires OpenMW 0.49 or newer.**
+- **Requires OpenMW 0.51 or newer.**
 - Install and enable [Max Yari's Script Services (MSS)](https://www.nexusmods.com/morrowind/mods/60256), it's a required dependency.
 - Install this mod **with a mod organiser**: download the archive (or this repository as an archive) and drag and drop it into your mod organiser of choice (e.g [Mod Organizer 2](https://github.com/ModOrganizer2/modorganizer/releases) on Windows or [Nerevarine Organizer](https://github.com/grazelandsnomad/nerevarine_organizer/releases/tag/v0.70) on Linux). **Or** [read this tutorial](https://modding-openmw.com/tips/installing-mods/) on how to install mods using the launcher or completely manually (it's also very easy).
 - Enable the mod's .omwscripts file in the "Content Files" tab of the OpenMW launcher.
@@ -106,7 +106,7 @@ Mods by [mym](https://next.nexusmods.com/profile/mym) are compatible.
 
 ## ☮ For developers
 
-Mercy provides an extension interface for developing new NPC behaviours that get injected alongside Mercy's own (patches for other mods can be made the same way), an interface to take Mercy out of the way for specific NPCs, and a config system to blacklist specific NPCs or whole cells from Mercy or from surrendering, and to keep specific items from being dropped by surrendering NPCs. Spell mods can also drop a file into Mercy's spells folder to have Mercy's NPCs cast their spells. Mercy's behaviour trees live in `OpenMW AI.b3`, which you can open in the [Behavior3+ editor](https://github.com/MaxYari/behavior3editorplus).
+Mercy provides an extension interface for developing new NPC behaviours that get injected alongside Mercy's own (patches for other mods can be made the same way), an interface to take Mercy out of the way for specific NPCs, and a config system to blacklist specific NPCs or whole cells from Mercy, from surrendering or from Mercy's voice lines, and to keep specific items from being dropped by surrendering NPCs. Spell mods can also drop a file into Mercy's spells folder to have Mercy's NPCs cast their spells. Mercy's behaviour trees live in `OpenMW AI.b3`, which you can open in the [Behavior3+ editor](https://github.com/MaxYari/behavior3editorplus).
 
 All of it is documented in the [git repository](https://github.com/MaxYari/OpenMWMercyCAO#adding-mercy-compatibility-to-your-mod). If you are already reading this on git - just read below.
 
@@ -123,6 +123,7 @@ All .yaml files in that folder are merged together, so each mod can ship its own
 
 - `full_disable` - `recordIds` and `cellIds` of actors/cells that Mercy does not touch at all.
 - `surrender_disable` - `recordIds` and `cellIds` of actors/cells that never surrender.
+- `voice_disable` - `recordIds` and `cellIds` of actors/cells that never say Mercy's voice lines (taunts, surrender pleas, warnings and so on). Lines the engine itself plays, like vanilla hit grunts and attack shouts, are not affected.
 - `item_dump_disable` - `recordIds` of items that a surrendering NPC never drops on the ground (`cellIds` is ignored here). Use it for summoned (bound) items, which would otherwise stay in the world forever once dropped, and for items that make no sense to hand over, like body parts. See `configs/bound_items.yaml` and `configs/cannibals_of_morrowind.yaml` for examples.
 
 ```yaml
@@ -341,7 +342,8 @@ Example:
 ```Lua
 local interfaces = require('openmw.interfaces')
 
-interfaces.MercyCAO.addVoiceRecords(StandGround = {
+interfaces.MercyCAO.addVoiceRecords({
+   StandGround = {
       {
          race = "imperial",
          gender = "female",
@@ -359,10 +361,14 @@ interfaces.MercyCAO.addVoiceRecords(StandGround = {
                sound = "path_to_file_3.mp3"
             }
          }
-      },)
+      }
+   }
+})
 ```
 
 Whenever Mercy will trigger this voiceline - one of the provided files will be randomly selected and played.
+
+NPCs in werewolf form only use groups marked `werewolf = true` (of any race and gender, unless the group names a `race` or `gender`), and other NPCs never use them. Mercy's own werewolf groups use Bloodmoon's growls; werewolves use them even with the AI Voicelines setting off.
 
 
 ## ☮ MWSE compatibility

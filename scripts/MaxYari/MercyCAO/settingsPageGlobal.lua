@@ -188,6 +188,29 @@ I.Settings.registerGroup {
     },
 }
 
+I.Settings.registerGroup {
+    key = 'SettingsMercyCAODebug',
+    page = 'MercyCAOPage',
+    l10n = 'MercyCAO',
+    name = 'Debug',
+    order = 5,
+    permanentStorage = true,
+    settings = {
+        {
+            key = 'DebugLevel',
+            renderer = 'number',
+            default = 0,
+            argument = {
+                integer = true,
+                min = 0,
+                max = 3,
+            },
+            name = 'Debug Logging Level',
+            description = "What Mercy writes to the log (openmw.log and the F10 console), each level adding to the one before.\n0: only warnings and errors.\n1: startup - each NPC starting to compile its behaviour trees and how long it took - and notable events: friends attacked or killed, chases given up, leaving combat, other mods' extensions.\n2: attack and movement details.\n3: a trace of every magic, hiding and detection decision and of who controls an NPC in a fight. Very verbose, for bug reports.\nNPCs pick up a change when they next enter the scene, reload a save to apply it everywhere.",
+        },
+    },
+}
+
 return {
-    
+
 }

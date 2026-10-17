@@ -1,28 +1,45 @@
 mp = "scripts/MaxYari/MercyCAO/"
 
+-- OpenMW version check: Mercy needs OpenMW 0.51 (Lua API revision 129) or newer. Checked before anything else loads, the
+-- player script tells the user.
+local core = require("openmw.core")
+if core.API_REVISION < 129 then return end
+
 local gutils = require(mp .. "scripts/gutils")
 local json = require(mp .. "libs/json")
 local magicUtil = require(mp .. "scripts/magic_util")
 local manaPotions = require(mp .. "scripts/mana_potions")
 
-local core = require("openmw.core")
 local types = require("openmw.types")
 local I = require("openmw.interfaces")
 local vfs = require('openmw.vfs')
 local markup = require("openmw.markup")
 local world = require("openmw.world")
 
-DebugLevel = 1
-
-if core.API_REVISION < 64 then return end
+DebugLevel = gutils.debugLevel()
 
 -- Parsing JSON behaviourtree -----
 gutils.print("Global: Reading Behavior3 project", 1)
+-- The project is serialized and rebuilt for every NPC Mercy starts on, so only what the tree builder reads
+-- (behavior3_parser.lua) is kept. The editor's own data - node descriptions, node positions on its canvas, its custom
+-- node definitions - is over a third of the file.
+local function stripEditorData(project)
+    local trees = {}
+    for i, tree in ipairs((project.data or project).trees) do
+        local nodes = {}
+        for id, node in pairs(tree.nodes) do
+            nodes[id] = { name = node.name, title = node.title, properties = node.properties, child = node.child,
+                children = node.children, isStealthy = node.isStealthy }
+        end
+        trees[i] = { id = tree.id, title = tree.title, root = tree.root, nodes = nodes }
+    end
+    return { data = { trees = trees } }
+end
 -- Read the behaviour tree JSON file exported from the editor---------------
 local file = vfs.open(mp .. "OpenMW AI.b3")
 if not file then error("Failed opening behaviour tree file.") end
 -- Decode it
-local b3projectJson = json.decode(file:read("*a"))
+local b3projectJson = stripEditorData(json.decode(file:read("*a")))
 -- And close it
 file:close()
 ----------------------------------------------------------------------------
@@ -32,6 +49,8 @@ local function loadBlacklists()
     local mergedBlacklist = {
         full_disable = { recordIds = {}, cellIds = {} },
         surrender_disable = { recordIds = {}, cellIds = {} },
+        -- Actors/cells where Mercy's NPCs never say Mercy's voice lines
+        voice_disable = { recordIds = {}, cellIds = {} },
         -- Item record ids that are never dropped on the ground during surrender (cellIds unused)
         item_dump_disable = { recordIds = {}, cellIds = {} }
     }
@@ -143,7 +162,7 @@ local function usableCustomSpells()
 end
 
 for _, skipped in ipairs(magicUtil.SKIPPED_SPELLS) do
-    gutils.print("Mercy: custom spell file " .. skipped.file .. " isn't used: " .. skipped.reason, 1)
+    gutils.print("Mercy: custom spell file " .. skipped.file .. " isn't used: " .. skipped.reason, 0)
 end
 
 -- Every custom spell needs a branch in the tree's Spells subtree to be cast. Mercy's own are placed in the editor; the
@@ -212,26 +231,64 @@ end
 -----------------------------------------------------------------------------
 
 
-local pendingActors = {}
+-- Startup data for NPCs ----------------------------------------------------
+-- NPCs ask for it when they enter the scene (HiImMercyActor) and build their trees from it over a few frames. It's
+-- handed out to one NPC at a time, the nearest to the player first, so a town full of NPCs starts without stalling the
+-- game. An NPC leaving the scene drops its own request (Mercy_StartupRelease), nothing here walks the actors around.
+local pendingActors = {} -- actor id -> actor, waiting for their startup data
+-- The NPC building its trees from the data it was sent last, until it says it's done or the timeout passes
+local buildingActor = nil
+local buildingSince = 0
+-- Seconds the next NPC waits for the one building. After that it gets its data anyway, and the slow one keeps building.
+local BUILD_TIMEOUT = 1
+
+local function sendStartupData(actor)
+    ensureCustomSpells()
+    actor:sendEvent("Mercy_StartupData", {
+        b3projectJson = b3projectJson,
+        blacklist = blacklist,
+        customSpells = usableCustomSpells(),
+    })
+end
+
+local function nearestPendingActor()
+    local player = world.players[1]
+    if not player then return nil end
+    local playerPos = player.position
+    local nearest, nearestDist = nil, math.huge
+    for id, actor in pairs(pendingActors) do
+        if not actor:isValid() then
+            pendingActors[id] = nil
+        else
+            local dist = (actor.position - playerPos):length2()
+            if dist < nearestDist then nearest, nearestDist = actor, dist end
+        end
+    end
+    return nearest
+end
 
 local function onUpdate()
     for i = 1, #spellUpdates do spellUpdates[i]() end
 
-    -- Send one actor event per frame. Hopefully distributing the workload and removing the stutter.
-    if #pendingActors > 0 then
-        ensureCustomSpells()
-        local actor = table.remove(pendingActors)
-        actor:sendEvent("Mercy_StartupData",{
-            b3projectJson = b3projectJson,
-            blacklist = blacklist,
-            customSpells = usableCustomSpells(),
-        })
+    if next(pendingActors) == nil then return end
+    local now = core.getSimulationTime()
+    if buildingActor and now - buildingSince < BUILD_TIMEOUT then return end
+    buildingActor = nearestPendingActor()
+    if buildingActor then
+        pendingActors[buildingActor.id] = nil
+        buildingSince = now
+        sendStartupData(buildingActor)
     end
 end
 
 local eventHandlers = {
         HiImMercyActor = function(data)
-            table.insert(pendingActors,data.source)
+            pendingActors[data.source.id] = data.source
+        end,
+        -- An NPC done building, or out of the scene: forget its request, and free the slot if it held it
+        Mercy_StartupRelease = function(data)
+            pendingActors[data.source.id] = nil
+            if buildingActor and buildingActor.id == data.source.id then buildingActor = nil end
         end,
         dumpInventory = function(data)
             -- data.actor, data.position

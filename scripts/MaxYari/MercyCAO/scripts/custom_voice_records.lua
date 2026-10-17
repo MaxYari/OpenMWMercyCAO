@@ -267,6 +267,15 @@ local records = {
             }
          }
       },
+      {
+         werewolf = true,
+         infos = {
+            {
+               text = "Grrrr!",
+               sound = vvf .. "ww\\moan.mp3"
+            }
+         }
+      }
    },
    Retreat = {
       {
@@ -395,6 +404,23 @@ local records = {
             }
          }
       },
+      {
+         werewolf = true,
+         infos = {
+            {
+               text = "Growl!",
+               sound = vvf .. "ww\\scrm.mp3"
+            },
+            {
+               text = "Roar!",
+               sound = vvf .. "ww\\roar.mp3"
+            },
+            {
+               text = "Grrrr!",
+               sound = vvf .. "ww\\moan.mp3"
+            }
+         }
+      }
    },
    GetEm = {
       {
@@ -716,6 +742,15 @@ local records = {
                text = "Seize him!",
                sound = vvf .. "d\\f\\OP_DF008.mp3",
                targetGender = "male"
+            }
+         }
+      },
+      {
+         werewolf = true,
+         infos = {
+            {
+               text = "Roar!",
+               sound = vvf .. "ww\\roar.mp3"
             }
          }
       }
@@ -1246,6 +1281,15 @@ local records = {
                sound = vf .. "DunFFriendDead3.mp3"
             }
          }
+      },
+      {
+         werewolf = true,
+         infos = {
+            {
+               text = "Roar!",
+               sound = vvf .. "ww\\roar.mp3"
+            }
+         }
       }
    },
    Warcry = {
@@ -1366,17 +1410,61 @@ local records = {
                sound = vf .. "NordMWarcry3.mp3"
             }
          }
+      },
+      {
+         werewolf = true,
+         infos = {
+            {
+               text = "Roar!",
+               sound = vvf .. "ww\\roar.mp3"
+            }
+         }
+      }
+   },
+   Attack = {
+      {
+         werewolf = true,
+         infos = {
+            {
+               text = "Roar!",
+               sound = vvf .. "ww\\roar.mp3"
+            }
+         }
+      }
+   },
+   Hit = {
+      {
+         werewolf = true,
+         infos = {
+            {
+               text = "Growl!",
+               sound = vvf .. "ww\\scrm.mp3"
+            },
+            {
+               text = "Roar!",
+               sound = vvf .. "ww\\roar.mp3"
+            }
+         }
       }
    }
 }
 
-local function findRelevantInfos(recordType, race, gender, isBeast)
+-- A group marked werewolf = true is for a speaker in werewolf form, of any race and gender unless it names one. Other
+-- groups are for the speaker's own race and gender out of werewolf form.
+local function findRelevantInfos(recordType, race, gender, isWerewolf)
    local fittingInfos = {}
    local typerecords = records[recordType]
    if not typerecords then return fittingInfos end
 
    for _, infosGroup in ipairs(typerecords) do
-      if infosGroup.race == race and infosGroup.gender == gender then
+      local fits
+      if isWerewolf then
+         fits = infosGroup.werewolf and (not infosGroup.race or infosGroup.race == race)
+            and (not infosGroup.gender or infosGroup.gender == gender)
+      else
+         fits = not infosGroup.werewolf and infosGroup.race == race and infosGroup.gender == gender
+      end
+      if fits then
          fittingInfos = infosGroup.infos
          break
       end

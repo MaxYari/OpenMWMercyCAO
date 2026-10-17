@@ -108,31 +108,23 @@ function BehaviourTree:initialize(config)
   self.childNode = config.root
 
   -- Walking the tree and setting up important properties
-  local function process(node, address)
+  -- (Upstream also gives every node an address here, its path of child indices from the root. Nothing reads it, and
+  -- copying the path for each node was a sizeable share of building a tree, so it's gone.)
+  local function process(node)
     node.tree = self
-    node.address = address
-    --print("Node " .. node.name .. " address: ", table.concat(node.address, ","))
 
     if node.childNode then
       node.childNode.parentNode = node
-
-      local childAddress = shallowTableCopy(address)
-      table.insert(childAddress, 1)
-
-      process(node.childNode, childAddress)
+      process(node.childNode)
     end
     if node.childNodes then
-      for i, childNode in pairs(node.childNodes) do
+      for _, childNode in pairs(node.childNodes) do
         childNode.parentNode = node
-
-        local childAddress = shallowTableCopy(address)
-        table.insert(childAddress, i)
-
-        process(childNode, childAddress)
+        process(childNode)
       end
     end
   end
-  process(self, { 1 })
+  process(self)
 
   -- Interrupts
   self.interrupts = {}
